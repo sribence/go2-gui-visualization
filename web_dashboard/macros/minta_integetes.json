@@ -1,0 +1,16 @@
+﻿{
+  "name": "minta_integetes",
+  "created_at": 1725890000.0,
+  "duration_s": 4.0,
+  "distance_m": 0.0,
+  "sample_count": 3,
+  "waypoint_count": 1,
+  "samples": [
+    { "t": 0.0, "vx": 0.0, "vy": 0.0, "vyaw": 0.0, "x": 0.0, "y": 0.0, "yaw": 0.0, "action": null },
+    { "t": 0.5, "vx": 0.0, "vy": 0.0, "vyaw": 0.0, "x": 0.0, "y": 0.0, "yaw": 0.0, "action": "wave" },
+    { "t": 4.0, "vx": 0.0, "vy": 0.0, "vyaw": 0.0, "x": 0.0, "y": 0.0, "yaw": 0.0, "action": null }
+  ],
+  "waypoints": [
+    { "id": 1, "t": 0.5, "x": 0.0, "y": 0.0, "yaw": 0.0, "action": "wave" }
+  ]
+}

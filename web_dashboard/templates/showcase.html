@@ -1,0 +1,2944 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NERO_GO2 — Capability Showcase</title>
+<style>
+  :root {
+    --bg: #05070a;
+    --panel: #0c1118;
+    --border: #1c2733;
+    --text: #dbe7f2;
+    --muted: #5f7386;
+    --accent: #22e5ff;
+    --accent2: #7bffb0;
+    --warn: #ffb84d;
+    --danger: #ff5566;
+    /* Kizárólag tranziens eseményekre (gait-váltás, parancs, riasztás) —
+       SOHA nem folyamatos UI-elemre, hogy megjelenése önmagában jelentsen
+       valamit (ld. docs/14-capability-showcase-projekt.md workflow-jegyzék). */
+    --event: #ff2fd6;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: radial-gradient(ellipse at 50% 0%, #0b1420 0%, var(--bg) 60%);
+    color: var(--text);
+    font-family: "Consolas", "SFMono-Regular", Menlo, monospace;
+    margin: 0;
+    overflow: hidden;
+  }
+  #layout {
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    grid-template-rows: 56px 1fr;
+    height: 100vh;
+  }
+  @media (max-width: 900px) {
+    #layout { grid-template-columns: 1fr 240px; }
+    #cam-panel { width: 130px; }
+    header .title { font-size: 12px; }
+  }
+  header {
+    grid-column: 1 / 3;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(12, 17, 24, 0.85);
+  }
+  header .title { font-size: 15px; letter-spacing: 0.08em; color: var(--accent); text-shadow: 0 0 12px rgba(34, 229, 255, 0.5); }
+  header .title b { color: var(--text); text-shadow: none; }
+  header .mode { font-size: 13px; padding: 4px 12px; border: 1px solid var(--accent); border-radius: 3px; color: var(--accent); }
+  header .clock { font-size: 12px; color: var(--muted); }
+  #viewport { position: relative; background: #060a0f; }
+  #viewport canvas { display: block; }
+  .hud-corner {
+    position: absolute; font-size: 11px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.1em;
+  }
+  #hud-tl { top: 14px; left: 14px; }
+  #hud-bl { bottom: 14px; left: 14px; }
+  #hud-tl .big { font-size: 22px; color: var(--accent2); text-shadow: 0 0 10px rgba(123,255,176,.5); font-weight: bold; }
+  #sidebar {
+    border-left: 1px solid var(--border);
+    background: rgba(12, 17, 24, 0.9);
+    padding: 16px;
+    overflow-y: auto;
+  }
+  .panel { border: 1px solid var(--border); border-radius: 6px; padding: 12px; margin-bottom: 14px; background: rgba(255,255,255,0.015); }
+  .panel h3 { margin: 0 0 10px; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+  .kv { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px; }
+  .kv span { color: var(--muted); }
+  .kv b { color: var(--text); }
+  .bar-row { display: flex; align-items: center; gap: 6px; font-size: 10px; margin-bottom: 4px; }
+  .bar-row .lbl { width: 62px; color: var(--muted); flex-shrink: 0; }
+  .bar-track { flex: 1; height: 6px; background: #10161f; border-radius: 3px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 3px; transition: width 0.1s linear, background 0.3s; }
+  .bar-val { width: 40px; text-align: right; color: var(--muted); flex-shrink: 0; }
+  #badge-sdk { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--muted); color: var(--muted); }
+  #badge-sdk.ok { color: var(--accent2); border-color: var(--accent2); }
+
+  /* 1. Kamera-HUD panel a jobb felső sarokban */
+  #cam-panel {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    width: 440px;
+    z-index: 15;
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    overflow: hidden;
+    background: #000;
+    box-shadow: 0 0 24px rgba(34,229,255,0.25);
+    transition: width 0.2s ease;
+  }
+  #cam-panel.cam-compact { width: 300px; }
+  @media (max-width: 1400px) { #cam-panel { width: 380px; } }
+  @media (max-width: 1100px) { #cam-panel { width: 300px; } }
+  #cam-panel .cam-label {
+    position: absolute; top: 0; left: 0; right: 0; padding: 6px 10px;
+    font-size: 11px; letter-spacing: 0.1em; color: var(--accent);
+    background: linear-gradient(rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.5) 70%, transparent 100%);
+    z-index: 2; display: flex; justify-content: space-between; align-items: center;
+  }
+  #cam-panel img { width: 100%; display: block; aspect-ratio: 16/9; max-height: 260px; object-fit: cover; opacity: 0.96; }
+  #cam-panel.cam-compact img { aspect-ratio: 4/3; max-height: 200px; }
+  #cam-panel.cam-folded img, #cam-panel.cam-folded .reticle, #cam-panel.cam-folded .scanline,
+  #cam-panel.cam-folded #security-overlay, #cam-panel.cam-folded #security-toggle-btn { display: none; }
+  #cam-panel .reticle {
+    position: absolute; inset: 0; pointer-events: none;
+    border: 1px solid rgba(34,229,255,0.35);
+  }
+  #cam-panel .reticle::before, #cam-panel .reticle::after {
+    content: ""; position: absolute; background: var(--accent); opacity: 0.6;
+  }
+  #cam-panel .reticle::before { top: 50%; left: 8px; right: 8px; height: 1px; }
+  #cam-panel .reticle::after { left: 50%; top: 8px; bottom: 8px; width: 1px; }
+  #cam-panel .scanline {
+    position: absolute; left: 0; right: 0; height: 2px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    animation: scan 2.4s linear infinite; opacity: 0.55;
+  }
+  @keyframes scan { 0% { top: 0%; } 100% { top: 100%; } }
+
+  /* 2. Felső nézet- és szenzor-kezelő eszköztár — balról jobbra, a sebesség mellett */
+  #view-buttons {
+    position: absolute;
+    top: 14px;
+    left: 150px;
+    right: 465px;
+    display: flex;
+    gap: 6px;
+    z-index: 20;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  #view-buttons button {
+    font-family: inherit; font-size: 10px; letter-spacing: .03em; padding: 6px 10px;
+    background: rgba(12,17,24,0.88); backdrop-filter: blur(6px); color: var(--text); border: 1px solid var(--border);
+    border-radius: 4px; cursor: pointer; transition: border-color .2s, color .2s;
+    white-space: nowrap;
+  }
+  #view-buttons button:hover { border-color: var(--accent); color: var(--accent); }
+  #view-buttons button.active-view { border-color: var(--accent); color: var(--accent); background: rgba(34,229,255,0.12); }
+
+  /* 3. Hesai felugró beállítás-panel (Max pontszám csúszka stb.) */
+  #hesai-settings-popover {
+    position: absolute;
+    top: 52px;
+    left: 200px;
+    width: 320px;
+    background: rgba(12, 17, 24, 0.95);
+    backdrop-filter: blur(14px);
+    border: 1px solid #bb66ff;
+    border-radius: 6px;
+    padding: 12px 14px;
+    z-index: 30;
+    box-shadow: 0 8px 30px rgba(187,102,255,0.25);
+    display: none;
+  }
+  #hesai-settings-popover.open { display: block; }
+  #hesai-settings-popover .pop-row {
+    display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; font-size: 11px;
+  }
+  #hesai-settings-popover .pop-row label { color: var(--muted); }
+  #hesai-settings-popover .pop-row span { font-weight: bold; color: #bb66ff; font-family: monospace; font-size: 11px; }
+  #hesai-settings-popover input[type="range"] {
+    width: 100%; accent-color: #bb66ff; margin: 2px 0 10px;
+  }
+
+  /* LiDAR diagnosztikai csúszkák */
+  #lidar-debug-panel {
+    position: absolute; top: 254px; right: 14px; width: 220px;
+    border: 1px solid var(--border); border-radius: 4px; padding: 8px 10px;
+    background: rgba(12,17,24,0.85); font-size: 10px; color: var(--muted);
+  }
+  #lidar-debug-panel .dbg-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+  #lidar-debug-panel .dbg-row:last-child { margin-bottom: 0; }
+  #lidar-debug-panel label { width: 90px; flex-shrink: 0; }
+  #lidar-debug-panel input[type="range"] { flex: 1; accent-color: var(--accent); }
+  #lidar-debug-panel span { width: 34px; text-align: right; color: var(--text); }
+
+  /* Képesség-legenda (statikus, a robot valós műszaki adatai) */
+  #legend-panel .legend-item { font-size: 11px; margin-bottom: 8px; padding-left: 10px; border-left: 2px solid var(--accent); }
+  #legend-panel .legend-item b { display: block; color: var(--text); font-size: 12px; }
+  #legend-panel .legend-item span { color: var(--muted); }
+
+  /* Boot-szekvencia — indításkor egyszer lefut, aztán eltűnik */
+  #boot-overlay {
+    position: fixed; inset: 0; z-index: 100; background: #05070a;
+    display: flex; align-items: center; justify-content: center;
+    transition: opacity 0.6s ease;
+  }
+  #boot-overlay.hidden { opacity: 0; pointer-events: none; }
+  #boot-lines { font-size: 13px; color: var(--accent2); line-height: 1.9; text-shadow: 0 0 8px rgba(123,255,176,.4); }
+  #boot-lines .done { color: var(--muted); }
+  #boot-lines .cursor { display: inline-block; width: 8px; background: var(--accent2); animation: blink 0.8s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* MOCK/LIVE adatforrás-jelölő — kritikus tudományos hitelesség */
+  #data-source-badge {
+    font-size: 11px; padding: 3px 10px; border-radius: 3px; letter-spacing: 0.05em; font-weight: bold;
+  }
+  #data-source-badge.mock { color: #05070a; background: repeating-linear-gradient(45deg, var(--warn), var(--warn) 6px, #2a1e0a 6px, #2a1e0a 12px); }
+  #data-source-badge.live { color: #05070a; background: var(--accent2); }
+  #confidence-index { font-size: 10px; color: var(--muted); margin-left: 8px; }
+
+  /* IMU mesterséges horizont */
+  #horizon-wrap { display: flex; justify-content: center; }
+
+  /* Ember-vs-robot kontraszt sáv */
+  #contrast-strip { display: flex; font-size: 10px; color: var(--muted); gap: 4px; align-items: center; }
+  #contrast-strip .vs { color: var(--accent); }
+
+  /* Gait állapotgép diagram */
+  #gait-fsm { display: flex; align-items: center; gap: 4px; font-size: 10px; flex-wrap: wrap; }
+  #gait-fsm .state { padding: 4px 8px; border: 1px solid var(--border); border-radius: 3px; color: var(--muted); }
+  #gait-fsm .state.active { border-color: var(--accent2); color: var(--accent2); background: rgba(123,255,176,0.08); box-shadow: 0 0 8px rgba(123,255,176,0.3); }
+  #gait-fsm .arrow { color: var(--border); }
+
+  /* Teljesítmény sparkline */
+  #power-canvas { width: 100%; height: 40px; display: block; }
+
+  /* Hero-flash — nagy, átmeneti, középre villanó felirat gait-váltásra/riasztásra */
+  #hero-flash {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) scale(.85);
+    font-size: clamp(28px, 5vw, 56px); font-weight: 700; letter-spacing: .04em;
+    text-shadow: 0 0 24px currentColor; opacity: 0; pointer-events: none;
+    transition: opacity .35s ease, transform .35s ease; text-align: center; z-index: 5;
+    white-space: nowrap;
+  }
+
+  /* Parancs-toast + rövid glitch-átmenet gait-váltáskor */
+  #command-toast {
+    position: fixed; top: -60px; left: 0; right: 0; z-index: 50;
+    padding: 10px 20px; font-size: 15px; font-weight: 700; letter-spacing: .08em; text-align: center;
+    background: linear-gradient(90deg, transparent, var(--event), transparent);
+    color: #05070a; transition: top .3s cubic-bezier(.2,.9,.3,1);
+  }
+  #glitch-overlay {
+    position: fixed; inset: 0; z-index: 40; pointer-events: none; opacity: 0; mix-blend-mode: overlay;
+    background: repeating-linear-gradient(0deg, rgba(255,47,214,.4) 0px, transparent 2px, transparent 5px);
+  }
+  #glitch-overlay.active { animation: glitchJitter .25s steps(4); opacity: .8; }
+  @keyframes glitchJitter { 0%{transform:translateX(0)} 25%{transform:translateX(-4px)} 50%{transform:translateX(3px)} 75%{transform:translateX(-2px)} 100%{transform:translateX(0);opacity:0} }
+
+  /* Ambient scanline-drift + vignette-pulzálás a viewporton — mélységérzet, olcsó CSS-only */
+  #viewport::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 1;
+    background: repeating-linear-gradient(0deg, rgba(255,255,255,.015) 0px, transparent 2px, transparent 4px);
+    animation: scanlineDrift 8s linear infinite;
+  }
+  @keyframes scanlineDrift { from { background-position-y: 0; } to { background-position-y: 200px; } }
+  #viewport::before {
+    content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 1;
+    background: radial-gradient(ellipse at 50% 50%, transparent 40%, rgba(0,0,0,.5) 100%);
+    animation: vignettePulse 6s ease-in-out infinite;
+  }
+  @keyframes vignettePulse { 0%,100% { opacity: .15; } 50% { opacity: .32; } }
+
+  /* Szám-változás "punch" animáció — F1-telemetria-stílusú frissülés-visszajelzés */
+  .kv b { transform-origin: left center; display: inline-block; }
+  .punch { animation: punchPop .25s ease-out; }
+  @keyframes punchPop { 0% { transform: scale(1.28); color: var(--event); } 100% { transform: scale(1); } }
+
+  /* Presenter mód — a diagnosztikai csúszkák alapból rejtve, 'd' billentyűvel
+     vagy ?debug=1 URL-paraméterrel előhívhatók (ld. korábbi élő debug-igény). */
+  #lidar-debug-panel { display: none; }
+
+  /* Kézi vezérlőpult — az index.html (fő vezérlőpult, :5002) már bevált
+     arm/disarm + joystick + akció-gomb mintája, ide a showcase HUD-stílusára
+     hangolva (2026-09-04: a user ezt kérte a showcase oldalra is). */
+  /* 2026-09-05: a bemutatón egyértelműen meg kell különböztetni a valós
+     (élő SDK/kamera/LiDAR) funkciókat a ma esti szimulált koncepció-demóktól
+     — user explicit kérése, ne tűnjön becsapósnak a diákok felé. */
+  .panel.concept-demo { position: relative; border-color: #ffb020; }
+  .concept-demo-badge {
+    background: #ffb020; color: #05070a; font-size: 9px; font-weight: 800;
+    letter-spacing: 0.04em; padding: 3px 8px; border-radius: 3px;
+    display: inline-block; margin-bottom: 8px;
+  }
+
+  #calib-panel .calib-row { display: flex; align-items: center; gap: 6px; margin-bottom: 7px; font-size: 10px; color: var(--muted); }
+  #calib-panel .calib-row label { flex: 0 0 130px; }
+  #calib-panel .calib-row input[type="range"] { flex: 1; }
+  #calib-panel .calib-row span { flex: 0 0 34px; text-align: right; color: var(--text); }
+
+  #patrol-panel .nav-btn {
+    font-size: 10px; padding: 6px 10px; border-radius: 4px; border: 1px solid var(--border);
+    background: rgba(255,255,255,0.03); color: var(--muted); font-family: inherit; cursor: pointer;
+  }
+  #patrol-panel .nav-btn.active { border-color: var(--accent); color: var(--accent); }
+  #patrol-panel .nav-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+  #macro-panel .macro-btn {
+    font-size: 10px; padding: 6px 10px; border-radius: 4px; border: 1px solid var(--border);
+    background: rgba(255,255,255,0.03); color: var(--text); font-family: inherit; cursor: pointer;
+    transition: all 0.15s;
+  }
+  #macro-panel .macro-btn:hover:not(:disabled) { background: rgba(255,255,255,0.08); }
+  #macro-panel .macro-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  @keyframes blinkSlow { 0%,100%{opacity:1;} 50%{opacity:0.25;} }
+
+  /* 4. Kézi vezérlőpult — ALUL horizontális dokk elrendezésben */
+  #control-panel {
+    position: absolute;
+    bottom: 14px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 25;
+    background: rgba(12, 17, 24, 0.94);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 16px;
+    margin-bottom: 0;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.7);
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    transition: transform 0.25s ease, opacity 0.25s ease;
+  }
+  #control-panel.ctl-minimized {
+    transform: translateX(-50%) translateY(calc(100% - 28px));
+  }
+  #control-panel .ctl-section {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  #control-panel .ctl-sep {
+    width: 1px;
+    height: 75px;
+    background: rgba(255,255,255,0.1);
+    flex-shrink: 0;
+  }
+  #control-panel .arm-btn {
+    padding: 8px 14px; font-size: 11px; font-weight: 700; letter-spacing: .04em;
+    border-radius: 4px; border: 1px solid var(--border); cursor: pointer;
+    background: rgba(255,255,255,0.05); color: var(--text); font-family: inherit;
+    transition: all 0.15s; white-space: nowrap;
+  }
+  #control-panel .arm-btn.armed { background: var(--danger); border-color: var(--danger); color: #05070a; }
+  #control-panel .sticks { display: flex; gap: 14px; align-items: center; margin: 0; }
+  #control-panel .stick-col { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+  #control-panel .stick-base {
+    width: 82px; height: 82px; border-radius: 50%;
+    background: #0b0d11; border: 2px solid var(--border);
+    position: relative; touch-action: none;
+    transition: border-color 0.2s;
+  }
+  #control-panel .stick-base:not(.disabled):hover { border-color: var(--accent); }
+  #control-panel .stick-knob {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: var(--accent); position: absolute;
+    top: 50%; left: 50%; transform: translate(-50%, -50%);
+    pointer-events: none; box-shadow: 0 0 12px rgba(34,229,255,0.7);
+  }
+  #control-panel .stick-base.disabled .stick-knob { background: var(--border); box-shadow: none; }
+  #control-panel .ctl-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+  #control-panel .ctl-actions button {
+    padding: 6px 9px; font-size: 10px; font-weight: 600; border-radius: 4px; border: 1px solid var(--border);
+    background: rgba(255,255,255,0.04); color: var(--text); cursor: pointer; font-family: inherit;
+    transition: all 0.15s; white-space: nowrap;
+  }
+  #control-panel .ctl-actions button:disabled { opacity: 0.3; cursor: not-allowed; }
+  #control-panel .ctl-actions button:not(:disabled):hover { border-color: var(--accent); color: var(--accent); background: rgba(34,229,255,0.08); }
+</style>
+</head>
+<body>
+<div id="boot-overlay">
+  <div id="boot-lines"></div>
+</div>
+<div id="command-toast"></div>
+<div id="glitch-overlay"></div>
+
+<div id="layout">
+  <header>
+    <div class="title">NERO_GO2 <b>&mdash; CAPABILITY SHOWCASE</b></div>
+    <button id="estop-btn" style="background:#c8102e; color:#fff; border:none; font-weight:900; font-size:15px; letter-spacing:1px; padding:10px 22px; border-radius:6px; cursor:pointer; box-shadow:0 0 12px rgba(200,16,46,0.6);">⛔ VÉSZLEÁLLÍTÁS</button>
+    <div class="mode" id="mode-label">&mdash;</div>
+    <div style="display:flex; align-items:center; gap:14px;">
+      <span id="data-source-badge">&mdash;</span>
+      <span id="confidence-index"></span>
+      <span id="badge-sdk">SDK: &mdash;</span>
+      <span class="clock" id="clock"></span>
+    </div>
+  </header>
+
+  <div id="viewport">
+    <div id="hero-flash"></div>
+    <div class="hud-corner" id="hud-tl">
+      <div>SEBESSÉG</div>
+      <div class="big" id="hud-speed">0.00 m/s</div>
+    </div>
+    <div class="hud-corner" id="hud-bl">
+      NERO_GO2 &mdash; Unitree Go2 EDU &mdash; élő ízület-szimuláció &mdash; <span id="lidar-status">LiDAR: —</span>
+      <div id="gait-fsm" style="margin-top:6px;"></div>
+      <div id="contrast-strip" style="margin-top:6px;">
+        <span>Emberi reakcióidő ~250 ms</span><span class="vs">vs</span><span>NERO_GO2 vezérlőhurok ~10 ms</span>
+      </div>
+      <div style="font-size:9px; color:var(--muted); margin-top:4px;">
+        🖱 Bal klikk: forgatás · Jobb klikk / Shift+húzás: térbeli mozgatás · Görgő: zoom · Dupla klikk: robotra fókusz
+      </div>
+    </div>
+    <!-- 1. Kamera ablak a jobb felső sarokban -->
+    <div id="cam-panel">
+      <div class="cam-label">
+        <div style="display:flex; align-items:center; gap:6px;">
+          <span id="cam-name">ELÜLSŐ KAMERA</span>
+          <button id="dock-size-toggle-btn" type="button" style="font-size:9px; padding:2px 6px; border:1px solid var(--accent); background:rgba(34,229,255,0.18); color:var(--accent); border-radius:2px; cursor:pointer;" title="Kamera méretének váltása (440px / 300px)">2X</button>
+          <button id="cam-fold-btn" type="button" style="font-size:9px; padding:2px 5px; border:1px solid var(--border); background:rgba(255,255,255,0.06); color:var(--muted); border-radius:2px; cursor:pointer;" title="Kamera összecsukása / lenyitása">▲</button>
+        </div>
+        <div style="display:flex; gap:3px;">
+          <button id="cam-source-go2" type="button" style="font-size:9px; padding:2px 6px; border:1px solid var(--accent); background:rgba(34,229,255,0.2); color:var(--accent); border-radius:2px; cursor:pointer;">Go2</button>
+          <button id="cam-source-realsense" type="button" style="font-size:9px; padding:2px 6px; border:1px solid var(--muted); background:rgba(12,17,24,0.8); color:var(--muted); border-radius:2px; cursor:pointer;">RealSense</button>
+          <button id="cam-source-depth" type="button" style="font-size:9px; padding:2px 6px; border:1px solid var(--muted); background:rgba(12,17,24,0.8); color:var(--muted); border-radius:2px; cursor:pointer;" title="RealSense színezett 2D mélységtérkép">3D Mélység</button>
+        </div>
+      </div>
+      <img id="cam-feed" src="/camera_feed" alt="élő kamera">
+      <canvas id="security-overlay" style="position:absolute; inset:0; width:100%; height:100%; pointer-events:none;"></canvas>
+      <button id="security-toggle-btn" title="Koncepció demó — szimulált detekció, nem valós CV" style="position:absolute; bottom:6px; right:6px; z-index:5; font-size:10px; padding:3px 6px; border-radius:4px; border:1px solid #ffb020; background:rgba(5,7,10,0.7); color:#ffb020; cursor:pointer;">🛡 Security mód (demó)</button>
+      <div class="reticle"></div>
+      <div class="scanline"></div>
+    </div>
+
+    <!-- 2. Felső nézet- és szenzor-eszköztár -->
+    <div id="view-buttons">
+      <button id="view-follow-btn" type="button" class="active-view">🎯 Követés: BE</button>
+      <button id="view-tpv-btn" type="button" class="active-view">👁 TPV</button>
+      <button id="view-fpv-btn" type="button">🐕 FPV</button>
+      <button id="view-close-btn" type="button">🔍 Közel</button>
+      <button id="view-wide-btn" type="button">🌐 Távol</button>
+      <button id="builtin-lidar-toggle-btn" type="button" class="active-view" style="border-color:#44ff88; color:#44ff88;">🟢 Go2 LiDAR: BE</button>
+      <button id="hesai-lidar-toggle-btn" type="button" class="active-view" style="border-color:#bb66ff; color:#bb66ff;">🟣 Hesai LiDAR: BE</button>
+      <button id="hesai-settings-toggle-btn" type="button" style="border-color:#bb66ff; color:#bb66ff; background:rgba(187,102,255,0.12);">⚙️ Hesai pontszám</button>
+      <button id="hesai-freeze-btn" type="button">❄️ Freeze: KI</button>
+      <button id="view-reset-map-btn" type="button" style="border-color:#ffb84d; color:#ffb84d;">🔄 Reset</button>
+    </div>
+
+    <!-- 3. Hesai felugró beállítások ablak (Csúszkák: Max pontszám, megmaradás, méret) -->
+    <div id="hesai-settings-popover">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; border-bottom:1px solid rgba(187,102,255,0.3); padding-bottom:6px;">
+        <span style="font-size:11px; font-weight:bold; color:#bb66ff; letter-spacing:0.05em;">🟣 HESAI LIDAR BEÁLLÍTÁSOK</span>
+        <button id="hesai-pop-close-btn" type="button" style="background:transparent; border:none; color:var(--muted); font-size:14px; cursor:pointer; line-height:1;">✕</button>
+      </div>
+      <div class="pop-row">
+        <label>Max. pontszám (felbontás)</label>
+        <span id="hesai-pop-max-val">18 000 pont</span>
+      </div>
+      <input type="range" id="hesai-pop-max-slider" min="2000" max="35000" step="1000" value="18000">
+      <div style="font-size:9px; color:var(--muted); margin-top:-6px; margin-bottom:10px;">Alacsonyabb = kímélőbb Wi-Fi · Magasabb = sűrű pontfelhő</div>
+      
+      <div class="pop-row">
+        <label>Megmaradási idő (Persistence)</label>
+        <span id="hesai-pop-persist-val">3.5 s</span>
+      </div>
+      <input type="range" id="hesai-pop-persist-slider" min="0.5" max="8.0" step="0.5" value="3.5">
+
+      <div class="pop-row">
+        <label>3D Pontméret</label>
+        <span id="hesai-pop-size-val">0.035</span>
+      </div>
+      <input type="range" id="hesai-pop-size-slider" min="0.01" max="0.08" step="0.005" value="0.035">
+
+      <div style="margin-top:10px; padding-top:8px; border-top:1px solid rgba(187,102,255,0.2);">
+        <div class="pop-row" style="margin-bottom:4px;">
+          <label>Forgási frekvencia (Szenzor sűrűség)</label>
+          <span id="hesai-pop-spin-val" style="color:#22e5ff;">5 Hz (300 rpm)</span>
+        </div>
+        <div style="display:flex; gap:5px; margin-top:4px; margin-bottom:4px;">
+          <button type="button" id="hesai-spin-5hz-btn" class="nav-btn active" style="flex:1; font-size:10px; padding:5px 2px; border-color:#22e5ff; color:#22e5ff;" title="300 rpm — 2x sűrűbb vízszintes pontfelhő">5 Hz (300 rpm) ⭐</button>
+          <button type="button" id="hesai-spin-10hz-btn" class="nav-btn" style="flex:1; font-size:10px; padding:5px 2px;" title="600 rpm — Normál sebesség (10 kör/mp)">10 Hz (600 rpm)</button>
+          <button type="button" id="hesai-spin-20hz-btn" class="nav-btn" style="flex:1; font-size:10px; padding:5px 2px;" title="1200 rpm — Gyors, ritkább mintavételezés">20 Hz (1200 rpm)</button>
+        </div>
+        <div style="font-size:9px; color:var(--muted); line-height:1.2;">5 Hz = 2x sűrűbb vízszintes felbontás és felismerhetőbb tereptárgyak!</div>
+      </div>
+
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px; padding-top:6px; border-top:1px solid rgba(255,255,255,0.06);">
+        <button id="hesai-pop-freeze-btn" type="button" style="padding:4px 8px; font-size:10px; border-radius:3px; border:1px solid var(--border); background:rgba(255,255,255,0.05); color:var(--text); cursor:pointer;">❄️ Fagyasztás</button>
+        <span id="hesai-pop-live-count" style="font-size:10px; color:#bb66ff;">Betöltve: 18 000 pont</span>
+      </div>
+    </div>
+
+    <!-- 4. Kézi vezérlőpult — ALUL horizontális cockpit dokként -->
+    <div id="control-panel">
+      <div class="ctl-section" style="min-width: 140px; gap: 4px;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <span style="font-size:11px; font-weight:700; color:var(--accent); letter-spacing:0.04em;">🎮 KÉZI VEZÉRLÉS</span>
+          <button id="ctl-fold-btn" type="button" style="font-size:9px; padding:1px 5px; border:1px solid var(--border); background:rgba(255,255,255,0.05); color:var(--muted); border-radius:3px; cursor:pointer;" title="Vezérlő összecsukása / kinyitása">▼</button>
+        </div>
+        <button class="arm-btn" id="ctl-arm-btn">🔒 Zárolva</button>
+        <span style="font-size:9px; color:var(--muted); font-family:monospace; text-align:center;">WASD · Q/E · Shift</span>
+      </div>
+
+      <div class="ctl-sep"></div>
+
+      <div class="sticks">
+        <div class="stick-col">
+          <div class="stick-base disabled" id="ctl-stick1" title="Bal kar: előre/hátra/oldalazás (WASD)"><div class="stick-knob"></div></div>
+          <span style="font-size:9px; color:var(--muted); letter-spacing:0.04em;">BAL KAR (WASD)</span>
+        </div>
+        <div class="stick-col">
+          <div class="stick-base disabled" id="ctl-stick2" title="Jobb kar: forgás (Q/E)"><div class="stick-knob"></div></div>
+          <span style="font-size:9px; color:var(--muted); letter-spacing:0.04em;">JOBB KAR (Q/E)</span>
+        </div>
+      </div>
+
+      <div class="ctl-sep"></div>
+
+      <div class="ctl-actions">
+        <button data-action="stand_up" disabled>🚶 Állj fel</button>
+        <button data-action="lay_down" disabled>🛌 Feküdj</button>
+        <button data-action="sit" disabled>🪑 Ülj le</button>
+        <button data-action="wave" disabled>👋 Integess</button>
+        <button data-action="heart" disabled>💖 Szív</button>
+      </div>
+    </div>
+
+    <div id="lidar-debug-panel">
+      <div class="dbg-row"><label>Pontméret</label><input type="range" id="dbg-point-size" min="0.005" max="0.08" step="0.001" value="0.035"><span id="dbg-point-size-val">0.035</span></div>
+    </div>
+  </div>
+
+  <div id="sidebar">
+    <div class="panel">
+      <h3>Táp</h3>
+      <div class="kv"><span>Feszültség</span><b id="v-voltage">&mdash;</b></div>
+      <div class="kv"><span>Áram</span><b id="v-current">&mdash;</b></div>
+    </div>
+
+    <div class="panel">
+      <h3>IMU (test-orientáció)</h3>
+      <div id="horizon-wrap"><canvas id="horizon-canvas" width="140" height="90"></canvas></div>
+      <div class="kv"><span>Roll</span><b id="v-roll">&mdash;</b></div>
+      <div class="kv"><span>Pitch</span><b id="v-pitch">&mdash;</b></div>
+      <div class="kv"><span>Yaw</span><b id="v-yaw">&mdash;</b></div>
+    </div>
+
+    <div class="panel">
+      <h3>Becsült teljesítményfelvétel (P = &tau;&times;&omega;)</h3>
+      <canvas id="power-canvas" width="300" height="40"></canvas>
+      <div class="kv" style="margin-top:6px;"><span>Pillanatnyi</span><b id="v-power">&mdash;</b></div>
+      <div class="kv"><span>Összesen (session)</span><b id="v-energy">&mdash;</b></div>
+      <div style="font-size:9px; color:var(--muted); margin-top:4px;">valós mérnöki képlet, szintetikus bemenő adatokon</div>
+    </div>
+
+    <div class="panel">
+      <h3>Stabilitás (súlypont vs. támasztó-poligon)</h3>
+      <div class="kv"><span>Állapot</span><b id="v-stability">&mdash;</b></div>
+      <div style="font-size:9px; color:var(--muted); margin-top:4px;">zöld = statikusan stabil, sárga = csak a lépésritmus tartja egyensúlyban</div>
+    </div>
+
+    <div class="panel">
+      <h3>Ízület-hőmérséklet (°C)</h3>
+      <div id="motor-temp-bars"></div>
+    </div>
+
+    <div class="panel">
+      <h3>Ízület-terhelés (Nm, becsült)</h3>
+      <div id="motor-tau-bars"></div>
+    </div>
+
+    <div class="panel" id="calib-panel">
+      <h3>🛠 LiDAR Kalibráció <span style="font-size:10px; color:var(--muted); font-weight:normal;">(Beépített 81° rögzítve &amp; Hesai)</span></h3>
+      <div class="calib-row"><label style="display:flex; align-items:center; gap:5px;"><input type="checkbox" id="calib-lidar-mirror" style="width:auto;"> Beépített LiDAR tükrözés</label></div>
+      <div class="calib-row"><label>Hesai forgás</label><input type="range" id="calib-hesai-yaw" min="-180" max="180" step="1" value="180"><span id="calib-hesai-yaw-val">180°</span></div>
+      <div class="calib-row"><label style="display:flex; align-items:center; gap:5px;"><input type="checkbox" id="calib-hesai-mirror" style="width:auto;"> Hesai tükrözés</label></div>
+      <div class="calib-row"><label>Hesai megmaradás</label><input type="range" id="calib-hesai-persist" min="0.5" max="30" step="0.5" value="3.5"><span id="calib-hesai-persist-val">3.5 s</span></div>
+      <div class="calib-row"><label style="display:flex; align-items:center; gap:5px;"><input type="checkbox" id="calib-hesai-freeze" style="width:auto;"> ❄️ Pontfelhő fagyasztás (freeze)</label></div>
+    </div>
+
+    <div class="panel" id="patrol-panel">
+      <h3>Robotporszívó mód <span style="font-size:10px; color:var(--muted); font-weight:normal;">(élő térkép — Hesai LiDAR + odometria)</span></h3>
+      <canvas id="patrol-canvas" width="300" height="300" style="width:100%; border-radius:4px; background:#05070a; cursor:crosshair;"></canvas>
+      <div class="kv" style="margin-top:6px;"><span>Mód</span><b id="v-nav-mode">azonnali</b></div>
+      <div class="kv"><span>Állapot</span><b id="v-nav-status">&mdash;</b></div>
+      <div style="display:flex; gap:6px; margin-top:8px; flex-wrap:wrap;">
+        <button id="nav-mode-immediate" class="nav-btn active">Azonnali kattintás</button>
+        <button id="nav-mode-script" class="nav-btn">Útvonal-lista</button>
+        <button id="nav-script-run" class="nav-btn" disabled>▶ Lista indítása</button>
+        <button id="nav-script-clear" class="nav-btn">Törlés</button>
+        <button id="nav-reset-map" class="nav-btn" style="border-color:#ffb84d; color:#ffb84d;">🔄 Térkép reset</button>
+      </div>
+      <label style="display:flex; align-items:center; gap:5px; font-size:10px; color:var(--muted); margin-top:6px;">
+        <input type="checkbox" id="nav-next-photo"> következő pont: 📷 fotó-akció
+      </label>
+      <div id="nav-waypoint-list" style="font-size:10px; color:var(--muted); margin-top:6px;"></div>
+      <div style="font-size:9px; color:#44ff88; margin-top:6px;">🟢 Élő autonóm navigáció: a térképre kattintás a megadott koordinátákhoz vezeti a robotot (zárt hurkú P-szabályozás). Feloldott lakat szükséges.</div>
+    </div>
+
+    <div class="panel concept-demo" id="photo-events-panel">
+      <div class="concept-demo-badge">⚠ KONCEPCIÓ DEMÓ (SZIMULÁCIÓ)</div>
+      <h3>Fotó-események</h3>
+      <div id="photo-events-list" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
+    </div>
+
+    <div class="panel" id="thermal-panel">
+      <h3>Thermal Vision <span style="font-size:10px; color:var(--muted); font-weight:normal;">(MLX90640 — külső mikrokontroller-híd folyamatban)</span></h3>
+      <canvas id="thermal-canvas" width="128" height="96" style="width:100%; border-radius:4px; background:#05070a; filter:blur(1.5px);"></canvas>
+      <div class="kv" style="margin-top:6px;"><span>Tartomány</span><b id="v-thermal-range">&mdash;</b></div>
+    </div>
+
+    <div class="panel concept-demo" id="security-log-panel">
+      <div class="concept-demo-badge">⚠ KONCEPCIÓ DEMÓ (SZIMULÁCIÓ)</div>
+      <h3>Security log <span style="font-size:10px; color:var(--muted); font-weight:normal;">(demo — szimulált detekció)</span></h3>
+      <div id="security-log-list" style="font-size:10px; color:var(--muted); max-height:90px; overflow-y:auto;"></div>
+    </div>
+
+    <div class="panel" id="macro-panel">
+      <h3>🎬 Mozgás Rögzítés &amp; Visszajátszás</h3>
+      
+      <!-- Felvétel szekció -->
+      <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:8px; margin-bottom:8px;">
+        <div style="font-size:11px; font-weight:600; color:#ff6b6b; margin-bottom:6px; display:flex; justify-content:space-between; align-items:center;">
+          <span>🔴 RÖGZÍTÉS (FELVÉTEL)</span>
+          <span id="macro-rec-badge" style="display:none; font-size:9px; background:#ff4444; color:#fff; padding:2px 6px; border-radius:10px; animation:blinkSlow 1s infinite;">● RÖGZÍTÉS...</span>
+        </div>
+        <div style="display:flex; gap:6px; margin-bottom:6px;">
+          <input type="text" id="macro-name-input" placeholder="Makró neve (pl. elore_integet)" style="flex:1; background:#0b0d11; border:1px solid var(--border); color:#eee; border-radius:4px; padding:5px 8px; font-size:10px; font-family:inherit;">
+        </div>
+        <div style="display:flex; gap:6px; flex-wrap:wrap;">
+          <button id="macro-rec-start-btn" class="macro-btn" style="border-color:#ff4444; color:#ff6b6b; flex:1;">🔴 Felvétel</button>
+          <button id="macro-rec-wp-btn" class="macro-btn" style="border-color:#4da6ff; color:#4da6ff;" disabled title="Jelenlegi robot-pozíció elmentése útpontként">📍 Útpont</button>
+          <button id="macro-rec-stop-btn" class="macro-btn" style="border-color:#44ff88; color:#44ff88; flex:1;" disabled>⏹ Mentés</button>
+        </div>
+        <div id="macro-rec-info" style="font-size:10px; color:var(--muted); margin-top:6px; display:flex; justify-content:space-between;">
+          <span>Idő: <b id="macro-rec-timer">0.0s</b></span>
+          <span>Minták: <b id="macro-rec-count">0</b></span>
+          <span>Útpontok: <b id="macro-rec-wp-count">0</b></span>
+        </div>
+      </div>
+
+      <!-- Visszajátszás szekció -->
+      <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:8px;">
+        <div style="font-size:11px; font-weight:600; color:#4da6ff; margin-bottom:6px;">
+          ▶ AUTOMATIKUS VISSZAJÁTSZÁS
+        </div>
+        <div style="display:flex; gap:6px; margin-bottom:6px;">
+          <select id="macro-select" style="flex:1; background:#0b0d11; border:1px solid var(--border); color:#eee; border-radius:4px; padding:4px 6px; font-size:10px; font-family:inherit;">
+            <option value="">-- Válassz mentett makrót --</option>
+          </select>
+          <button id="macro-del-btn" class="macro-btn" style="padding:4px 8px; color:#ff4444;" title="Kiválasztott makró törlése" disabled>🗑</button>
+          <button id="macro-refresh-btn" class="macro-btn" style="padding:4px 8px;" title="Lista frissítése">🔄</button>
+        </div>
+        
+        <!-- Makró részletek -->
+        <div id="macro-details" style="font-size:10px; color:var(--muted); margin-bottom:8px; line-height:1.4; display:none; background:rgba(0,0,0,0.2); padding:5px; border-radius:4px;">
+          <div>Időtartam: <b id="macro-det-duration" style="color:var(--text);">-</b> &middot; Távolság: <b id="macro-det-dist" style="color:var(--text);">-</b></div>
+          <div>Adat: <b id="macro-det-points" style="color:var(--text);">-</b> &middot; Dátum: <b id="macro-det-date" style="color:var(--text);">-</b></div>
+        </div>
+
+        <!-- Sebesség beállítás -->
+        <div style="margin-bottom:8px;">
+          <div style="display:flex; justify-content:space-between; font-size:10px; margin-bottom:3px;">
+            <span style="color:var(--muted);">Lejátszási sebesség:</span>
+            <b id="macro-speed-val" style="color:#ffb84d;">0.5x (ajánlott / biztonságos)</b>
+          </div>
+          <input type="range" id="macro-speed-slider" min="0.2" max="1.0" step="0.1" value="0.5" style="width:100%;">
+        </div>
+
+        <!-- Lejátszás és Megállítás gombok -->
+        <div style="display:flex; gap:6px;">
+          <button id="macro-play-btn" class="macro-btn" style="border-color:#44ff88; color:#44ff88; flex:2; font-weight:700;" disabled>▶ Lejátszás indítása</button>
+          <button id="macro-abort-btn" class="macro-btn" style="border-color:#ff4444; color:#ff4444; flex:1; font-weight:700;" disabled>🛑 Megállítás</button>
+        </div>
+
+        <!-- Progress bar -->
+        <div id="macro-progress-box" style="margin-top:8px; display:none;">
+          <div style="display:flex; justify-content:space-between; font-size:9px; color:var(--muted); margin-bottom:2px;">
+            <span id="macro-play-status">Lejátszás folyamatban...</span>
+            <span id="macro-play-pct" style="color:var(--accent); font-weight:700;">0%</span>
+          </div>
+          <div style="width:100%; height:6px; background:#111; border-radius:3px; overflow:hidden; border:1px solid #333;">
+            <div id="macro-progress-bar" style="width:0%; height:100%; background:linear-gradient(90deg, #4da6ff, #44ff88); transition:width 0.2s;"></div>
+          </div>
+        </div>
+      </div>
+      <div style="font-size:9px; color:var(--muted); margin-top:6px; line-height:1.4;">💡 Tipp: Felvétel közben a WASD/joystick mozgás és az akció gombok is rögzítésre kerülnek. Lejátszáskor a robot automatikusan megismétli őket csökkentett sebességgel.</div>
+    </div>
+
+    <div class="panel" id="legend-panel">
+      <h3>Képességek &amp; műszaki adatok</h3>
+      <div class="legend-item"><b>🟢 12 szabadságfok (DOF)</b><span>3 forgó ízület / láb — a hivatalos Unitree URDF-ből, ma lekérve</span></div>
+      <div class="legend-item"><b>🟢 Csípő-ízület: 23.7 Nm / 30.1 rad/s</b><span>±60° mozgástartomány</span></div>
+      <div class="legend-item"><b>🟢 Térd-ízület: 45.43 Nm / 15.70 rad/s</b><span>majdnem kétszer akkora nyomaték, feleannyi sebesség — ez viseli a talajreakció-erő nagy részét landoláskor</span></div>
+      <div class="legend-item"><b>🟡 Fedélzeti AI: 40&ndash;100 TOPS</b><span>Jetson Orin Nano/NX — helyben futó AI-inferencia, nem felhő-függő</span></div>
+      <div class="legend-item"><b>🟢 Élő szenzor-fúzió</b><span>kamera + LiDAR + IMU + lábankénti erő-visszacsatolás egy dashboardon</span></div>
+      <div class="legend-item"><b>🟡 Nyílt SDK / ROS-kompatibilitás</b><span>Python/C++/ROS — kutatás-fejlesztésre nyitott EDU-platform</span></div>
+      <div class="legend-item"><b>🟡 Autonóm SLAM-navigáció</b><span>LiDAR-alapú térképezés + útvonaltervezés (nyílt forráskódú stackekben dokumentált)</span></div>
+      <div style="font-size:9px; color:var(--muted); margin-top:10px; line-height:1.5;">🟢 URDF-ből igazolt &middot; 🟡 hivatalos/kereskedelmi forrás, nem elsődleges datasheet</div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/ColladaLoader.js"></script>
+<script>
+// ---------------------------------------------------------------------
+// Geometria: a hivatalos Unitree Go2 URDF valós méretei/tengelyei
+// (unitreerobotics/unitree_ros/robots/go2_description/urdf/go2_description.urdf,
+// 2026-09-01-én lekérve `gh api`-val) — a mesh-fájlokat NEM töltjük be
+// (egyszerűség, ld. docs/14-capability-showcase-projekt.md), helyette
+// ugyanezekkel a valós offszetekkel/tengelyekkel épített primitív-váz.
+//
+// Koordináta-leképzés robot -> three.js: three.x = robot.x (előre),
+// three.y = robot.z (fel), three.z = robot.y (balra) — így a three.js
+// alap Y-fel konvenciója működik az OrbitControls-szal.
+// ---------------------------------------------------------------------
+const BODY = { x: 0.3762, y: 0.114, z: 0.0935 }; // three (hossz, magasság, szélesség)
+const THIGH_LEN = 0.213;
+const CALF_LEN = 0.213;
+const LEGS = [
+  // name, hipX(robot x), hipZ(three z = robot y), thighZoff(three z offset a hipPivoton belül)
+  { name: "FR", x:  0.1934, z: -0.0465, thighZ: -0.0955 },
+  { name: "FL", x:  0.1934, z:  0.0465, thighZ:  0.0955 },
+  { name: "RR", x: -0.1934, z: -0.0465, thighZ: -0.0955 },
+  { name: "RL", x: -0.1934, z:  0.0465, thighZ:  0.0955 },
+];
+// MOTOR_NAMES sorrend (app.py-val egyezően): FR,FL,RR,RL, mindegyik hip/thigh/calf
+const MOTOR_ORDER = ["FR_hip","FR_thigh","FR_calf","FL_hip","FL_thigh","FL_calf","RR_hip","RR_thigh","RR_calf","RL_hip","RL_thigh","RL_calf"];
+
+const scene = new THREE.Scene();
+const viewport = document.getElementById("viewport");
+const camera = new THREE.PerspectiveCamera(45, viewport.clientWidth / viewport.clientHeight, 0.01, 100);
+camera.position.set(0.9, 0.6, 0.9);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setSize(viewport.clientWidth, viewport.clientHeight);
+renderer.setPixelRatio(window.devicePixelRatio);
+viewport.appendChild(renderer.domElement);
+
+// Kézi kamera-vezérlés: húzással forgatható (azimut+polár szög), görgővel
+// zoomolható. Az OrbitControls.js nem tölthető be megbízhatóan cdnjs-ről
+// erre a three.js verzióra, ezért egy minimális, kézzel írt megfelelője —
+// 2026-09-04: a korábbi automatikus körbeforgás/kamera-koreográfia
+// zavarónak bizonyult (ez okozta az elöl/hátul félreértést is, és a
+// felhasználó explicit kézi vezérlést kért az automatikus helyett).
+const CAM_TARGET = new THREE.Vector3(0, 0.16, 0);
+let camAngle = 0.7;       // azimut (vízszintes forgás)
+let camPolar = 1.15;      // polár szög (magasság) — kb. 66°, enyhén felülnézet
+let camRadius = 1.6;      // induláskor mindkét LiDAR-pontfelhő is látszik
+const CAM_POLAR_MIN = 0.25, CAM_POLAR_MAX = Math.PI - 0.25;
+const CAM_RADIUS_MIN = 0.5, CAM_RADIUS_MAX = 6;
+
+// ---------------------------------------------------------------------
+// Élő kalibráció — user kérése: ahelyett, hogy vakon tippelgetnénk
+// szerver-redeploy-okkal, a felhasználó saját maga hangolja a szögeket/
+// tükrözéseket/eltolásokat élőben, amíg nem egyezik a valósággal. Minden
+// más kódrész ebből a window._calib objektumból olvas.
+window._calib = {
+  robotX: 0, robotY: 0,
+  avatarYawDeg: 0,
+  lidarYawDeg: 81, lidarMirror: false,
+  hesaiYawDeg: 180, hesaiMirror: false,
+  hesaiPersistSec: 3.5,
+  hesaiFreeze: false,
+  hesaiMaxPoints: 18000,
+};
+(function setupCalibPanel() {
+  function bind(rangeId, valId, key, isDeg, suffix) {
+    const el = document.getElementById(rangeId);
+    const valEl = document.getElementById(valId);
+    if (!el || !valEl) return;
+    el.addEventListener("input", () => {
+      const v = parseFloat(el.value);
+      window._calib[key] = v;
+      valEl.textContent = isDeg ? Math.round(v) + "°" : (suffix ? v.toFixed(1) + suffix : v.toFixed(2));
+    });
+  }
+  bind("calib-hesai-yaw", "calib-hesai-yaw-val", "hesaiYawDeg", true);
+  bind("calib-hesai-persist", "calib-hesai-persist-val", "hesaiPersistSec", false, " s");
+  document.getElementById("calib-lidar-mirror").addEventListener("change", (e) => { window._calib.lidarMirror = e.target.checked; });
+  document.getElementById("calib-hesai-mirror").addEventListener("change", (e) => { window._calib.hesaiMirror = e.target.checked; });
+  const freezeCb = document.getElementById("calib-hesai-freeze");
+  if (freezeCb) {
+    freezeCb.addEventListener("change", (e) => {
+      window._calib.hesaiFreeze = e.target.checked;
+      const btn = document.getElementById("hesai-freeze-btn");
+      if (btn) {
+        btn.textContent = e.target.checked ? "❄️ Freeze: BE" : "❄️ Freeze: KI";
+        btn.classList.toggle("active-view", e.target.checked);
+      }
+    });
+  }
+})();
+
+(function setupManualOrbit() {
+  const dom = renderer.domElement;
+  dom.style.touchAction = "none";
+  dom.style.cursor = "grab";
+  let dragging = false, lastX = 0, lastY = 0;
+  let dragMode = "orbit";
+  window._followRobot = true;
+
+  const followBtn = document.getElementById("view-follow-btn");
+  function setFollow(val) {
+    window._followRobot = val;
+    if (followBtn) {
+      followBtn.textContent = val ? "🎯 Robot követése: BE" : "🎯 Robot követése: KI";
+      followBtn.classList.toggle("active-view", val);
+    }
+  }
+
+  dom.addEventListener("contextmenu", (e) => e.preventDefault());
+
+  dom.addEventListener("pointerdown", (e) => {
+    dragging = true; lastX = e.clientX; lastY = e.clientY;
+    if (e.button === 2 || e.button === 1 || e.shiftKey) {
+      dragMode = "pan";
+      dom.style.cursor = "move";
+    } else {
+      dragMode = "orbit";
+      dom.style.cursor = "grabbing";
+    }
+    dom.setPointerCapture(e.pointerId);
+  });
+  dom.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    const dx = e.clientX - lastX, dy = e.clientY - lastY;
+    lastX = e.clientX; lastY = e.clientY;
+    if (dragMode === "pan") {
+      const panFactor = 0.0025 * camRadius;
+      const sinA = Math.sin(camAngle), cosA = Math.cos(camAngle);
+      CAM_TARGET.x += (sinA * dx + cosA * dy) * panFactor;
+      CAM_TARGET.z += (-cosA * dx + sinA * dy) * panFactor;
+      setFollow(false);
+    } else {
+      camAngle -= dx * 0.006;
+      camPolar = Math.min(CAM_POLAR_MAX, Math.max(CAM_POLAR_MIN, camPolar - dy * 0.006));
+    }
+  });
+  dom.addEventListener("pointerup", () => { dragging = false; dom.style.cursor = "grab"; });
+  dom.addEventListener("pointercancel", () => { dragging = false; dom.style.cursor = "grab"; });
+  dom.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    camRadius = Math.min(CAM_RADIUS_MAX, Math.max(CAM_RADIUS_MIN, camRadius + e.deltaY * 0.0025 * camRadius));
+  }, { passive: false });
+
+  dom.addEventListener("dblclick", () => {
+    if (typeof robotGroup !== "undefined") {
+      CAM_TARGET.x = robotGroup.position.x;
+      CAM_TARGET.z = robotGroup.position.z;
+    }
+    setFollow(true);
+  });
+
+  if (followBtn) {
+    followBtn.addEventListener("click", () => {
+      if (!window._followRobot && typeof robotGroup !== "undefined") {
+        CAM_TARGET.x = robotGroup.position.x;
+        CAM_TARGET.z = robotGroup.position.z;
+      }
+      setFollow(!window._followRobot);
+    });
+  }
+
+  // Két gomb: robot-közeli / LiDAR-távoli előre beállított nézet — a
+  // felhasználó explicit kérése "gomb kellene, hogy én állíthassam",
+  // az automatikus váltás helyett.
+  document.getElementById("view-close-btn").addEventListener("click", () => {
+    camRadius = 1.15; camPolar = 1.15;
+  });
+  document.getElementById("view-wide-btn").addEventListener("click", () => {
+    camRadius = 3.4; camPolar = 1.15;
+  });
+
+  const tpvBtn = document.getElementById("view-tpv-btn");
+  const fpvBtn = document.getElementById("view-fpv-btn");
+  tpvBtn.addEventListener("click", () => {
+    setCameraMode("tpv");
+    tpvBtn.classList.add("active-view");
+    fpvBtn.classList.remove("active-view");
+  });
+  fpvBtn.addEventListener("click", () => {
+    setCameraMode("fpv");
+    fpvBtn.classList.add("active-view");
+    tpvBtn.classList.remove("active-view");
+  });
+
+  const freezeBtn = document.getElementById("hesai-freeze-btn");
+  if (freezeBtn) {
+    freezeBtn.addEventListener("click", () => {
+      window._calib.hesaiFreeze = !window._calib.hesaiFreeze;
+      freezeBtn.textContent = window._calib.hesaiFreeze ? "❄️ Freeze: BE" : "❄️ Freeze: KI";
+      freezeBtn.classList.toggle("active-view", window._calib.hesaiFreeze);
+      const cb = document.getElementById("calib-hesai-freeze");
+      if (cb) cb.checked = window._calib.hesaiFreeze;
+    });
+  }
+
+  const resetMapBtn = document.getElementById("nav-reset-map");
+  const viewResetMapBtn = document.getElementById("view-reset-map-btn");
+  function doResetMap() {
+    if (typeof hesaiFrames !== "undefined") hesaiFrames.length = 0;
+    if (typeof hesaiGeometry !== "undefined") {
+      hesaiGeometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(0), 3));
+      hesaiGeometry.attributes.position.needsUpdate = true;
+    }
+    fetch("/reset_map", { method: "POST" })
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.success) {
+          CAM_TARGET.x = 0;
+          CAM_TARGET.z = 0;
+          setFollow(true);
+        }
+      })
+      .catch(() => {});
+  }
+  if (resetMapBtn) resetMapBtn.addEventListener("click", doResetMap);
+  if (viewResetMapBtn) viewResetMapBtn.addEventListener("click", doResetMap);
+})();
+
+(function setupCamSwitcher() {
+  const go2Btn = document.getElementById("cam-source-go2");
+  const rsBtn = document.getElementById("cam-source-realsense");
+  const depthBtn = document.getElementById("cam-source-depth");
+  const camFeed = document.getElementById("cam-feed");
+  const camName = document.getElementById("cam-name");
+  if (!go2Btn || !rsBtn || !camFeed) return;
+
+  function setActive(activeBtn, src, nameText, borderColor, bgColor) {
+    camFeed.src = src;
+    if (camName) camName.textContent = nameText;
+    [go2Btn, rsBtn, depthBtn].forEach((b) => {
+      if (!b) return;
+      if (b === activeBtn) {
+        b.style.borderColor = borderColor;
+        b.style.color = borderColor;
+        b.style.background = bgColor;
+      } else {
+        b.style.borderColor = "var(--muted)";
+        b.style.color = "var(--muted)";
+        b.style.background = "rgba(12,17,24,0.8)";
+      }
+    });
+  }
+
+  go2Btn.addEventListener("click", () => {
+    setActive(go2Btn, "/camera_feed", "GO2 ORR-KAMERA", "var(--accent)", "rgba(34,229,255,0.2)");
+  });
+
+  rsBtn.addEventListener("click", () => {
+    setActive(rsBtn, "/realsense_feed", "REALSENSE RGB", "var(--accent2)", "rgba(123,255,176,0.2)");
+  });
+
+  if (depthBtn) {
+    depthBtn.addEventListener("click", () => {
+      setActive(depthBtn, "/realsense_depth_feed", "REALSENSE 3D MÉLYSÉG", "#ff6b6b", "rgba(255,107,107,0.25)");
+    });
+  }
+})();
+
+// 2026-09-05: az élő occupancy grid ("Robotporszívó mód") most a FŐ 3D
+// nézetben is megjelenik, padló-textúraként a robot alatt — user explicit
+// kérése, hogy ne csak egy különálló, kis oldalpanelen legyen látható. A
+// kis 2D panel emellett megmarad, mert az kell a pontos kattintás-alapú
+// waypoint-kijelöléshez (perspektivikus 3D-ben nehéz pontosan kattintani).
+const liveMapFloorGeom = new THREE.PlaneGeometry(1, 1);
+const liveMapFloorMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.82, side: THREE.DoubleSide, depthWrite: false });
+const liveMapFloorMesh = new THREE.Mesh(liveMapFloorGeom, liveMapFloorMat);
+liveMapFloorMesh.rotation.x = -Math.PI / 2; // vízszintesre fektetve (alapból függőleges sík)
+liveMapFloorMesh.position.y = -0.02; // épphogy a lábak/talaj alatt, ne takarja a robotot
+liveMapFloorMesh.visible = false; // amíg nincs élő adat
+// 2026-09-05 FIX: explicit, garantáltan a LiDAR-pontok ELŐTT rajzolódjon
+// (a pontok renderOrder 998/999) — korábban ez nem volt explicit, és
+// közelről/FPV-ben a féligáttetsző padló időnként eltakarta a pontokat.
+liveMapFloorMesh.renderOrder = -1;
+scene.add(liveMapFloorMesh);
+
+function updateLiveMapFloor(d) {
+  if (!d.ready) { liveMapFloorMesh.visible = false; return; }
+  const off = document.createElement("canvas");
+  off.width = d.width; off.height = d.height;
+  const octx = off.getContext("2d");
+  const img = octx.createImageData(d.width, d.height);
+  for (let i = 0; i < d.data.length; i++) {
+    const v = d.data[i];
+    let r, g, b, a;
+    if (v < 0) { r = 20; g = 25; b = 32; a = 60; }        // ismeretlen — alig látszik
+    else if (v < 50) { r = 20; g = 40; b = 50; a = 90; }   // szabad — halvány sötétkék
+    else { r = 123; g = 255; b = 176; a = 230; }           // fal — akcens zöld, jól látható
+    const row = d.height - 1 - Math.floor(i / d.width);
+    const col = i % d.width;
+    const p = (row * d.width + col) * 4;
+    img.data[p] = r; img.data[p + 1] = g; img.data[p + 2] = b; img.data[p + 3] = a;
+  }
+  octx.putImageData(img, 0, 0);
+
+  if (liveMapFloorMat.map) liveMapFloorMat.map.dispose();
+  const tex = new THREE.CanvasTexture(off);
+  // 2026-09-05 FIX: alapból lágyított (Linear) nagyítást használ a
+  // WebGL-textúra, ami felnagyításkor homályosnak tűnik — élesre váltjuk,
+  // hogy inkább "pixeles/blokkos" legyen (ami a tényleges alacsony
+  // felbontást mutatja), ne homályos.
+  tex.magFilter = THREE.NearestFilter;
+  tex.minFilter = THREE.NearestFilter;
+  liveMapFloorMat.map = tex;
+  liveMapFloorMat.needsUpdate = true;
+
+  // 2026-09-05 FIX (user kérése): a térkép mostantól FIX a jelenetben (a
+  // sík geometriáját csak egyszer állítjuk be, utána sosem mozgatjuk) —
+  // a TPV kameránál is fix marad, a CAM_TARGET pont a világ-origóra néz.
+  // Az AVATÁR (robotGroup) mozog RAJTA a valós (robot_x, robot_y) alapján,
+  // a térkép középpontjához képest. Korábban fordítva volt (fix avatár,
+  // mozgó térkép alatta) — a user szerint ez zavaróbb és nehezebben
+  // értelmezhető volt, mint egy "drónnézetből" mozgó robot egy fix térképen.
+  const widthM = d.width * d.resolution, heightM = d.height * d.resolution;
+  if (!liveMapFloorMesh.userData.sized) {
+    liveMapFloorGeom.dispose();
+    liveMapFloorMesh.geometry = new THREE.PlaneGeometry(widthM, heightM);
+    liveMapFloorMesh.position.x = 0;
+    liveMapFloorMesh.position.z = 0;
+    liveMapFloorMesh.userData.sized = true;
+  }
+  window._liveMapCenterWorld = { x: d.origin_x + widthM / 2, y: d.origin_y + heightM / 2 };
+  liveMapFloorMesh.visible = true;
+
+  // Az avatár a fix térkép közepéhez viszonyított valós eltolással mozog
+  // (csak x/z — a .y a rögzített álló-magasság, azt nem bántjuk).
+  if (typeof d.robot_x === "number" && typeof d.robot_y === "number") {
+    robotGroup.position.x = d.robot_x - window._liveMapCenterWorld.x + window._calib.robotX;
+    robotGroup.position.z = -(d.robot_y - window._liveMapCenterWorld.y) + window._calib.robotY;
+  }
+}
+
+scene.add(new THREE.AmbientLight(0x557788, 1.2));
+const key = new THREE.DirectionalLight(0x22e5ff, 1.4);
+key.position.set(1, 2, 1);
+scene.add(key);
+const rim = new THREE.DirectionalLight(0x7bffb0, 0.6);
+rim.position.set(-1, 1, -1);
+scene.add(rim);
+
+const grid = new THREE.GridHelper(3, 30, 0x1c3040, 0x121a22);
+scene.add(grid);
+
+const accentMat = new THREE.MeshStandardMaterial({ color: 0x22e5ff, emissive: 0x0a3540, metalness: 0.4, roughness: 0.35 });
+const bodyMat = new THREE.MeshStandardMaterial({ color: 0x263340, emissive: 0x0a1218, metalness: 0.6, roughness: 0.3 });
+const jointMat = new THREE.MeshStandardMaterial({ color: 0x7bffb0, emissive: 0x114422, metalness: 0.5, roughness: 0.3 });
+
+const robotGroup = new THREE.Group();
+robotGroup.position.y = THIGH_LEN + CALF_LEN * 0.55; // nagyjából álló magasság
+scene.add(robotGroup);
+
+const bodyMesh = new THREE.Mesh(new THREE.BoxGeometry(BODY.x, BODY.y, BODY.z), bodyMat);
+robotGroup.add(bodyMesh);
+
+// Testhez rögzített "ELÜL" tájoló-jelölő — mivel a kamera folyamatosan
+// körbeforog (ld. lent), enélkül könnyű összetéveszteni, melyik oldal az
+// eleje/hátulja (2026-09-04: élő teszten pont ez okozott zavart —
+// a láb-adat maga helyes volt, csak a kamera épp hátulról nézett rá).
+// A jelölő a robotGroup GYERMEKE, tehát vele együtt forog/dől.
+function makeTextSprite(text, color) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 128; canvas.height = 48;
+  const ctx = canvas.getContext("2d");
+  ctx.font = "bold 28px monospace";
+  ctx.fillStyle = color;
+  ctx.textAlign = "center";
+  ctx.fillText(text, 64, 34);
+  const tex = new THREE.CanvasTexture(canvas);
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(0.25, 0.09, 1);
+  return sprite;
+}
+const frontLabel = makeTextSprite("ELÜL", "#22e5ff");
+frontLabel.position.set(BODY.x / 2 + 0.14, 0.06, 0);
+robotGroup.add(frontLabel);
+
+const frontArrow = new THREE.Mesh(
+  new THREE.ConeGeometry(0.025, 0.07, 12),
+  new THREE.MeshStandardMaterial({ color: 0x22e5ff, emissive: 0x0a3540 })
+);
+frontArrow.position.set(BODY.x / 2 + 0.03, 0, 0);
+frontArrow.rotation.z = -Math.PI / 2; // a kúp hegye +X irányba (előre) mutasson
+robotGroup.add(frontArrow);
+
+// legPivots[legIdx] = { hip, thigh, calf } — THREE.Group-ok, .rotation.x/.z-t
+// állítjuk majd az élő motor_q adatból.
+const legPivots = [];
+
+for (const leg of LEGS) {
+  const hipPivot = new THREE.Group();
+  hipPivot.position.set(leg.x, 0, leg.z);
+  robotGroup.add(hipPivot);
+
+  const hipMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.05, 16), jointMat);
+  hipMesh.rotation.z = Math.PI / 2; // X-tengely körül forog majd a pivot, a henger vizuálisan X-irányban áll
+  hipPivot.add(hipMesh);
+
+  // Láb-név címke a csípőn — a robotGroup-nak (nem a hipPivotnak) a
+  // gyermeke, hogy ne forogjon el a saját ízület-mozgásával, csak a
+  // robot egészének orientációjával.
+  const legLabel = makeTextSprite(leg.name, "#7bffb0");
+  legLabel.position.set(leg.x, 0.09, leg.z * 1.6);
+  robotGroup.add(legLabel);
+
+  const thighPivot = new THREE.Group();
+  thighPivot.position.set(0, 0, leg.thighZ);
+  hipPivot.add(thighPivot);
+
+  // Lábanként EGYEDI (klónozott) anyag a comb/lábszár-elemeken, hogy a
+  // hőtérkép (ld. es.onmessage motor_temp ág) színezni tudja őket
+  // egymástól függetlenül — közös anyaggal az egész robot egyszerre
+  // váltana színt egyetlen forró ízület miatt.
+  const legThighMat = accentMat.clone();
+  const legCalfMat = bodyMat.clone();
+
+  const thighMesh = new THREE.Mesh(new THREE.BoxGeometry(0.032, THIGH_LEN, 0.032), legThighMat);
+  thighMesh.position.set(0, -THIGH_LEN / 2, 0);
+  thighPivot.add(thighMesh);
+
+  const calfPivot = new THREE.Group();
+  calfPivot.position.set(0, -THIGH_LEN, 0);
+  thighPivot.add(calfPivot);
+
+  const calfMesh = new THREE.Mesh(new THREE.BoxGeometry(0.024, CALF_LEN, 0.024), legCalfMat);
+  calfMesh.position.set(0, -CALF_LEN / 2, 0);
+  calfPivot.add(calfMesh);
+
+  const footMesh = new THREE.Mesh(new THREE.SphereGeometry(0.022, 12, 12), jointMat);
+  footMesh.position.set(0, -CALF_LEN, 0);
+  calfPivot.add(footMesh);
+
+  legPivots.push({ hip: hipPivot, thigh: thighPivot, calf: calfPivot, foot: footMesh, thighMat: legThighMat, calfMat: legCalfMat });
+}
+
+// ---------------------------------------------------------------------
+// Valódi Go2 mesh (hivatalos unitreerobotics/unitree_ros go2_description
+// DAE-fájlok, 2026-09-04-én letöltve, ld. static/go2_description/) —
+// 2026-09-04: a user explicit kérése a procedurális doboz/henger-váz helyett.
+// Az illesztési pontok (hip/thigh/calf/foot pivot pozíciók, hip-forgatások
+// oldalanként) a letöltött go2_description.urdf <visual><origin>
+// értékeiből lettek kiolvasva. A geometria betöltése aszinkron; amíg nem
+// kész, a fenti procedurális váz látszik (garantált fallback).
+// Koordináta-megjegyzés: a mi jelenetünk a robot (x,y,z) -> three (x,z,y)
+// leképzést használ (ld. fenti komment), ami egy TÜKRÖZÉS (nem tiszta
+// forgatás) — a ColladaLoader viszont Z_UP->Y_UP forgatással konvertál.
+// Ezért minden betöltött darabon egy extra Z-tükrözést alkalmazunk, hogy
+// a kettő konzisztens legyen; a helyes irányt böngészőben ellenőriztük.
+// ---------------------------------------------------------------------
+const REAL_MESH_BASE = "/static/go2_description/meshes/";
+const daeLoader = new THREE.ColladaLoader();
+function loadDae(name) {
+  return new Promise((resolve, reject) => {
+    daeLoader.load(REAL_MESH_BASE + name, (collada) => resolve(collada.scene), undefined, reject);
+  });
+}
+function preparePart(scene, material) {
+  const wrap = new THREE.Group();
+  scene.traverse((child) => {
+    if (child.isMesh) {
+      child.material = material;
+      child.material.side = THREE.DoubleSide; // a tükrözés megfordíthatja a winding-ot
+    }
+  });
+  wrap.add(scene);
+  return wrap;
+}
+// FL rpy=(0,0,0), FR rpy=(π,0,0), RL rpy=(0,π,0), RR rpy=(π,π,0) — a
+// go2_description.urdf FL/FR/RL/RR_hip <visual><origin rpy=...> értékei.
+const HIP_EULER = {
+  FR: [Math.PI, 0, 0],
+  FL: [0, 0, 0],
+  RR: [Math.PI, Math.PI, 0],
+  RL: [0, Math.PI, 0],
+};
+
+Promise.all([
+  loadDae("base.dae"), loadDae("hip.dae"),
+  loadDae("thigh.dae"), loadDae("thigh_mirror.dae"),
+  loadDae("calf.dae"), loadDae("calf_mirror.dae"),
+  loadDae("foot.dae"),
+]).then(([baseTpl, hipTpl, thighTpl, thighMirrorTpl, calfTpl, calfMirrorTpl, footTpl]) => {
+  bodyMesh.visible = false;
+  const realBody = preparePart(baseTpl, bodyMat);
+  robotGroup.add(realBody);
+
+  LEGS.forEach((leg, i) => {
+    const lp = legPivots[i];
+    const isRight = leg.name[1] === "R"; // FR/RR jobb oldal -> mirror-mesh
+
+    lp.hip.children.find((c) => c.isMesh).visible = false;
+    const realHip = preparePart(hipTpl.clone(true), jointMat.clone());
+    const e = HIP_EULER[leg.name];
+    realHip.rotation.set(e[0], e[1], e[2]);
+    lp.hip.add(realHip);
+
+    lp._thighProcMesh = lp.thigh.children.find((c) => c.isMesh);
+    if (lp._thighProcMesh) lp._thighProcMesh.visible = false;
+    const realThigh = preparePart((isRight ? thighMirrorTpl : thighTpl).clone(true), lp.thighMat);
+    lp.thigh.add(realThigh);
+
+    lp._calfProcMesh = lp.calf.children.find((c) => c.isMesh);
+    if (lp._calfProcMesh) lp._calfProcMesh.visible = false;
+    const realCalf = preparePart((isRight ? calfMirrorTpl : calfTpl).clone(true), lp.calfMat);
+    lp.calf.add(realCalf);
+
+    lp.foot.visible = false;
+    const realFoot = preparePart(footTpl.clone(true), jointMat.clone());
+    realFoot.position.copy(lp.foot.position);
+    lp.foot.parent.add(realFoot);
+  });
+}).catch((err) => {
+  console.warn("Go2 valódi mesh betöltése sikertelen, procedurális váz marad:", err);
+});
+
+function applyMotorQ(q) {
+  if (!q || q.length < 12) return;
+  LEGS.forEach((leg, i) => {
+    const base = i * 3;
+    legPivots[i].hip.rotation.x = q[base + 0];
+    // 2026-09-05 FIX: a comb/lábszár hajlás iránya fordítva volt (a
+    // szimulációban előre hajoltak a lábak, valóságban/alapból hátra) —
+    // user élő tesztje szerint egyszerű előjel-hiba, nem a bal/jobb
+    // tükrözési probléma (az külön ügy, ld. Hesai/láb-emelés kommentek).
+    legPivots[i].thigh.rotation.z = -q[base + 1];
+    legPivots[i].calf.rotation.z = -q[base + 2];
+  });
+}
+
+// ---------------------------------------------------------------------
+// Súlypont (CoM, közelítő — testközéppont) + támasztó-poligon: klasszikus
+// lábas-robotikai stabilitás-fogalom. A 4 lábvég világkoordinátáját véve
+// kirajzoljuk a talajra vetített konvex négyszöget, és megnézzük, a CoM
+// vetülete belül van-e — statikus vs. dinamikus stabilitás szemléltetése.
+// ---------------------------------------------------------------------
+const comMarker = new THREE.Mesh(new THREE.SphereGeometry(0.02, 12, 12), new THREE.MeshBasicMaterial({ color: 0xffb84d }));
+scene.add(comMarker);
+
+const supportGeom = new THREE.BufferGeometry();
+const supportMat = new THREE.LineBasicMaterial({ color: 0x7bffb0, transparent: true, opacity: 0.6 });
+const supportLine = new THREE.LineLoop(supportGeom, supportMat);
+scene.add(supportLine);
+
+function pointInPolygon(px, pz, poly) {
+  // Sugár-vetéses (ray casting) benne-van teszt XZ síkban.
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i][0], zi = poly[i][1], xj = poly[j][0], zj = poly[j][1];
+    const intersect = ((zi > pz) !== (zj > pz)) && (px < (xj - xi) * (pz - zi) / (zj - zi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+function updateStability() {
+  const worldPos = new THREE.Vector3();
+  const feet = legPivots.map((lp) => { lp.foot.getWorldPosition(worldPos); return [worldPos.x, worldPos.z]; });
+  // Kirajzolható sorrend (négyszög, ne kereszteződjön): FR, FL, RL, RR
+  const order = [0, 1, 3, 2];
+  const positions = new Float32Array(order.length * 3);
+  order.forEach((legIdx, i) => {
+    positions[i * 3 + 0] = feet[legIdx][0];
+    positions[i * 3 + 1] = 0.002;
+    positions[i * 3 + 2] = feet[legIdx][1];
+  });
+  supportGeom.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  supportGeom.attributes.position.needsUpdate = true;
+
+  const comWorld = new THREE.Vector3();
+  bodyMesh.getWorldPosition(comWorld);
+  comMarker.position.set(comWorld.x, 0.004, comWorld.z);
+
+  const stable = pointInPolygon(comWorld.x, comWorld.z, feet);
+  supportMat.color.set(stable ? 0x7bffb0 : 0xffb84d);
+  comMarker.material.color.set(stable ? 0x7bffb0 : 0xffb84d);
+  const el = document.getElementById("v-stability");
+  if (el) el.textContent = stable ? "Statikusan stabil" : "Dinamikusan stabilizált (lépésritmus tartja)";
+}
+
+// ---------------------------------------------------------------------
+// LiDAR pontfelhő — /lidar_proxy-n keresztül (app.py proxyolja a
+// webrtc_bridge /lidar végpontját; mock módban a mock_robot szolgáltatja
+// a szintetikus pontfelhőt). Robot-koordináta [x,y,z] -> three [x,z,y],
+// ugyanaz a leképzés, mint a robotmodellnél.
+// ---------------------------------------------------------------------
+const lidarGeometry = new THREE.BufferGeometry();
+const lidarMaterial = new THREE.PointsMaterial({ size: 0.035, transparent: true, opacity: 0.8, vertexColors: true, sizeAttenuation: true, depthTest: false });
+const lidarPoints = new THREE.Points(lidarGeometry, lidarMaterial);
+lidarPoints.renderOrder = 999; // depthTest:false miatt mindig a tetején rajzolódjon, ne takarja el a robot-test
+// 2026-09-05: a scene gyermeke (NEM a robotGroup-é) — a pontokat MÁR a
+// befogás pillanatában érvényes orientációval világ-koordinátákba
+// forgatva kapjuk (ld. refreshLidar()), ezért itt nem szabad ŐKET IS
+// folyamatosan forgatni a robot élő animációjával, különben a régi
+// (2 másodpercig érvényes) pontok hamis irányba csúsznának el, majd
+// "visszaugranának" a következő friss adatnál.
+scene.add(lidarPoints);
+
+// A 2026-09-04-én felszerelt külső Hesai PandarXT-16 pontfelhője — saját
+// szenzor-koordinátarendszerből jön (a hesai_bridge dekóderéből), a robot
+// testéhez képesti pontos szerelési eltolás/forgás (extrinsic kalibráció)
+// MÉG NINCS megmérve, ezért csak egy becsült, a robot háta fölé helyezett
+// eltolással jelenítjük meg — narancssárga színnel megkülönböztetve a
+// beépített (cián/kék) LiDAR-tól, hogy ez a közelítő jelleg látható legyen.
+const hesaiGeometry = new THREE.BufferGeometry();
+const hesaiMaterial = new THREE.PointsMaterial({ color: 0xffb84d, size: 0.04, transparent: true, opacity: 0.75, depthTest: false });
+const hesaiPoints = new THREE.Points(hesaiGeometry, hesaiMaterial);
+hesaiPoints.renderOrder = 998;
+// 2026-09-05: a magasság-eltolás mostantól a per-pont transzformba van
+// beépítve (refreshLidar), mert az objektum-szintű .position fix maradna,
+// miközben az avatár most már el is mozdulhat (ld. updateLiveMapFloor).
+// A tegnap esti pásztázással validált 90 fokos szenzor-extrinsic korrekció
+// (ld. app.py LIVE_MAP_YAW_OFFSET) — three.js Y-tengely = a robot saját
+// függőleges (yaw-)tengelye a jelenlegi x,z,y koordináta-leképzésben.
+const HESAI_EXTRINSIC_QUAT = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2);
+// 2026-09-05: scene gyermeke, ld. a lidarPoints fenti kommentjét.
+scene.add(hesaiPoints);
+
+// 2026-09-09: Különálló LiDAR pontfelhő KI/BE kapcsolók a beépített Go2 és a külső Hesai 360°-hoz
+const builtinLidarBtn = document.getElementById("builtin-lidar-toggle-btn");
+let builtinLidarVisible = true;
+if (builtinLidarBtn) {
+  builtinLidarBtn.addEventListener("click", () => {
+    builtinLidarVisible = !builtinLidarVisible;
+    lidarPoints.visible = builtinLidarVisible;
+    builtinLidarBtn.textContent = builtinLidarVisible ? "🟢 Go2 LiDAR: BE" : "🟢 Go2 LiDAR: KI";
+    builtinLidarBtn.classList.toggle("active-view", builtinLidarVisible);
+  });
+}
+
+const hesaiLidarBtn = document.getElementById("hesai-lidar-toggle-btn");
+let hesaiLidarVisible = true;
+if (hesaiLidarBtn) {
+  hesaiLidarBtn.addEventListener("click", () => {
+    hesaiLidarVisible = !hesaiLidarVisible;
+    hesaiPoints.visible = hesaiLidarVisible;
+    hesaiLidarBtn.textContent = hesaiLidarVisible ? "🟣 Hesai LiDAR: BE" : "🟣 Hesai LiDAR: KI";
+    hesaiLidarBtn.classList.toggle("active-view", hesaiLidarVisible);
+  });
+}
+
+// Diagnosztikai csúszkák: annak kiderítésére, hogy a pontfelhő ténylegesen
+// megérkezik-e, csak a jelenlegi méret/kamera-zoom miatt nem látszik.
+const dbgPointSize = document.getElementById("dbg-point-size");
+const dbgPointSizeVal = document.getElementById("dbg-point-size-val");
+dbgPointSize.addEventListener("input", () => {
+  const sz = parseFloat(dbgPointSize.value);
+  lidarMaterial.size = sz;
+  hesaiMaterial.size = sz;
+  dbgPointSizeVal.textContent = dbgPointSize.value;
+});
+
+// Forgó "sweep" sugár — RViz-szerű felismerhető LiDAR-vizualizáció,
+// tisztán díszítő elem (a valós scan-irányt nem követi, csak a
+// forgó-szenzor benyomását kelti).
+const sweepGeom = new THREE.PlaneGeometry(3, 0.015);
+const sweepMat = new THREE.MeshBasicMaterial({ color: 0x22e5ff, transparent: true, opacity: 0.18, side: THREE.DoubleSide });
+const sweepBeam = new THREE.Mesh(sweepGeom, sweepMat);
+sweepBeam.position.set(1.5, 0.01, 0);
+sweepBeam.rotation.x = -Math.PI / 2;
+const sweepPivot = new THREE.Group();
+sweepPivot.add(sweepBeam);
+scene.add(sweepPivot);
+
+function updateLidarStatusText() {
+  const statusEl = document.getElementById("lidar-status");
+  if (!statusEl) return;
+  const b = statusEl.dataset.builtin || "LiDAR: —";
+  const h = statusEl.dataset.hesai || "";
+  statusEl.textContent = h ? `${b} · ${h}` : b;
+}
+
+async function refreshBuiltinLidar() {
+  const statusEl = document.getElementById("lidar-status");
+  try {
+    const res = await fetch("/lidar_proxy");
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const points = await res.json();
+    if (!Array.isArray(points) || points.length === 0) throw new Error("üres pontfelhő");
+    const positions = new Float32Array(points.length * 3);
+    const colors = new Float32Array(points.length * 3);
+    const c = new THREE.Color();
+
+    const cx = window._liveMapCenterWorld ? window._liveMapCenterWorld.x : 0;
+    const cy = window._liveMapCenterWorld ? window._liveMapCenterWorld.y : 0;
+    const offX = (window._calib && window._calib.robotX) || 0;
+    const offY = (window._calib && window._calib.robotY) || 0;
+    const rx = (typeof window._lastRawWorldX === "number") ? window._lastRawWorldX : cx;
+    const ry = (typeof window._lastRawWorldY === "number") ? window._lastRawWorldY : cy;
+
+    const lidarYawRad = ((window._calib && window._calib.lidarYawDeg) || 0) * Math.PI / 180;
+    const cosYl = Math.cos(lidarYawRad), sinYl = Math.sin(lidarYawRad);
+    const lidarMirrorSign = (window._calib && window._calib.lidarMirror) ? -1 : 1;
+
+    points.forEach((p, i) => {
+      const relX = p[0] - rx;
+      const relY = (p[1] - ry) * lidarMirrorSign;
+      const rotX = cosYl * relX - sinYl * relY;
+      const rotY = sinYl * relX + cosYl * relY;
+      const finalX = rx + rotX;
+      const finalY = ry + rotY;
+
+      positions[i * 3 + 0] = (finalX - cx);
+      positions[i * 3 + 1] = p[2] + 0.35;
+      positions[i * 3 + 2] = -(finalY - cy);
+
+      // Dinamikus színezés a robottól mért valós távolság alapján
+      const dist = Math.hypot(rotX, rotY);
+      const t = Math.min(1, dist / 4.0);
+      c.setHSL(0.38 - t * 0.28, 1.0, 0.55 - t * 0.15);
+      colors[i * 3 + 0] = c.r; colors[i * 3 + 1] = c.g; colors[i * 3 + 2] = c.b;
+    });
+    lidarGeometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    lidarGeometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+    lidarGeometry.attributes.position.needsUpdate = true;
+    lidarGeometry.attributes.color.needsUpdate = true;
+    if (statusEl) {
+      statusEl.dataset.builtin = `Go2 LiDAR: ${points.length} pont`;
+      updateLidarStatusText();
+    }
+  } catch (e) {
+    if (statusEl) {
+      statusEl.dataset.builtin = "Go2 LiDAR: nincs adat";
+      updateLidarStatusText();
+    }
+  }
+}
+
+let hesaiFrames = [];
+const HESAI_MAX_FRAMES = 15;
+
+async function refreshHesai() {
+  if (window._calib && window._calib.hesaiFreeze) return;
+  try {
+    const maxPts = (window._calib && window._calib.hesaiMaxPoints) || 18000;
+    const res2 = await fetch("/lidar_hesai_proxy?limit=" + maxPts);
+    if (!res2.ok) throw new Error("HTTP " + res2.status);
+    const hpoints = await res2.json();
+    if (!Array.isArray(hpoints) || hpoints.length === 0) throw new Error("üres pontfelhő");
+
+    // Hesai PandarXT-16: p[0]=jobb, p[1]=előre, p[2]=fel
+    const hesaiYaw = (window._lastRawYaw || 0) + (window._calib.hesaiYawDeg * Math.PI / 180);
+    const cosYh = Math.cos(hesaiYaw), sinYh = Math.sin(hesaiYaw);
+    const hesaiMirrorSign = window._calib.hesaiMirror ? -1 : 1;
+    const hesaiCapturePos = robotGroup.position.clone();
+
+    const n = hpoints.length;
+    const framePos = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      const p = hpoints[i];
+      const p_fwd = p[1];
+      const p_left = -p[0] * hesaiMirrorSign;
+      const rx = cosYh * p_fwd - sinYh * p_left;
+      const ry = sinYh * p_fwd + cosYh * p_left;
+      framePos[i * 3 + 0] = rx + hesaiCapturePos.x;
+      framePos[i * 3 + 1] = p[2] + hesaiCapturePos.y + 0.05; // közelítő szenzor-magasság-eltolás
+      framePos[i * 3 + 2] = -ry + hesaiCapturePos.z;
+    }
+
+    const now = performance.now();
+    hesaiFrames.push({ positions: framePos, count: n, timestamp: now });
+
+    // Megmaradási idő szerinti elévülés (persistence buffer — megszünteti a villogást és az oldalak eltűnését!)
+    const persistMs = ((window._calib && window._calib.hesaiPersistSec) || 3.5) * 1000;
+    while (hesaiFrames.length > 1 && (now - hesaiFrames[0].timestamp > persistMs)) {
+      hesaiFrames.shift();
+    }
+    if (hesaiFrames.length > HESAI_MAX_FRAMES) {
+      hesaiFrames.splice(0, hesaiFrames.length - HESAI_MAX_FRAMES);
+    }
+
+    let totalPoints = 0;
+    for (let i = 0; i < hesaiFrames.length; i++) totalPoints += hesaiFrames[i].count;
+
+    const merged = new Float32Array(totalPoints * 3);
+    let offset = 0;
+    for (let i = 0; i < hesaiFrames.length; i++) {
+      merged.set(hesaiFrames[i].positions, offset);
+      offset += hesaiFrames[i].positions.length;
+    }
+
+    hesaiGeometry.setAttribute("position", new THREE.BufferAttribute(merged, 3));
+    hesaiGeometry.attributes.position.needsUpdate = true;
+
+    const statusEl = document.getElementById("lidar-status");
+    if (statusEl) {
+      statusEl.dataset.hesai = `Hesai: ${totalPoints} pont (360° buffer)`;
+      updateLidarStatusText();
+    }
+    const liveCountEl = document.getElementById("hesai-pop-live-count");
+    if (liveCountEl) {
+      liveCountEl.textContent = `Betöltve: ${n} pont (${totalPoints} a 3D-ben)`;
+    }
+  } catch (e) {
+    // A Hesai opcionális kiegészítő szenzor - csendben kihagyjuk, ha nincs adat
+  }
+}
+
+refreshBuiltinLidar();
+setInterval(refreshBuiltinLidar, 1500);
+
+refreshHesai();
+setInterval(refreshHesai, 350);
+
+function applyBodyOrientation(roll, pitch, yaw) {
+  // robot roll(x)/pitch(y)/yaw(z) -> three: roll marad X, pitch -> Z, yaw -> Y
+  robotGroup.rotation.x = roll || 0;
+  robotGroup.rotation.z = pitch || 0;
+  robotGroup.rotation.y = (yaw || 0) + (window._calib.avatarYawDeg * Math.PI / 180);
+  window._lastRawYaw = yaw || 0; // a LiDAR/Hesai 3D-transzformnak kell, ld. refreshLidar()
+}
+
+function onResize() {
+  camera.aspect = viewport.clientWidth / viewport.clientHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(viewport.clientWidth, viewport.clientHeight);
+}
+window.addEventListener("resize", onResize);
+
+// 2026-09-05: kamera-nézet váltó (Third-Person / First-Person). TPV-ben a
+// kamera a scene gyermeke, gömbi koordinátákkal, felhasználói húzással
+// (setupManualOrbit) — ez a régi, változatlan viselkedés. FPV-ben a kamera
+// a robotGroup GYERMEKévé válik, fix lokális pozícióval/iránnyal — ezért
+// automatikusan együtt mozog/forog a robottal, "mintha a hátán ülnénk".
+let cameraMode = "tpv";
+const FPV_LOCAL_POS = new THREE.Vector3(-0.02, 0.16, 0);
+const FPV_LOCAL_LOOKAT = new THREE.Vector3(1.0, 0.05, 0); // előre (+X = "ELÜL", ld. frontLabel)
+
+function setCameraMode(mode) {
+  cameraMode = mode;
+  if (mode === "fpv") {
+    robotGroup.add(camera);
+    camera.position.copy(FPV_LOCAL_POS);
+    const worldTarget = robotGroup.localToWorld(FPV_LOCAL_LOOKAT.clone());
+    camera.lookAt(worldTarget);
+  } else {
+    scene.add(camera);
+  }
+}
+
+let sweepAngle = 0;
+function animate() {
+  requestAnimationFrame(animate);
+  if (cameraMode === "tpv") {
+    if (window._followRobot && typeof robotGroup !== "undefined") {
+      CAM_TARGET.x = robotGroup.position.x;
+      CAM_TARGET.z = robotGroup.position.z;
+    }
+    camera.position.set(
+      CAM_TARGET.x + camRadius * Math.sin(camPolar) * Math.cos(camAngle),
+      CAM_TARGET.y + camRadius * Math.cos(camPolar),
+      CAM_TARGET.z + camRadius * Math.sin(camPolar) * Math.sin(camAngle)
+    );
+    camera.lookAt(CAM_TARGET);
+  }
+  // FPV-ben nincs teendő itt — a kamera a robotGroup gyermeke, a fix
+  // lokális transzformot a szülő világ-mátrixa automatikusan viszi tovább.
+  sweepAngle += 0.02;
+  sweepPivot.rotation.y = sweepAngle;
+  robotGroup.updateMatrixWorld(true);
+  updateStability();
+  renderer.render(scene, camera);
+}
+animate();
+
+// ---------------------------------------------------------------------
+// Élő adat: SSE a /showcase_data-ról
+// ---------------------------------------------------------------------
+function tempColor(t) {
+  if (t < 40) return "#7bffb0";
+  if (t < 55) return "#ffb84d";
+  return "#ff5566";
+}
+
+function buildBarRows(container, labels) {
+  container.innerHTML = "";
+  return labels.map((label) => {
+    const row = document.createElement("div");
+    row.className = "bar-row";
+    row.innerHTML = `<div class="lbl">${label}</div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val">&mdash;</div>`;
+    container.appendChild(row);
+    return { fill: row.querySelector(".bar-fill"), val: row.querySelector(".bar-val") };
+  });
+}
+
+const tempRows = buildBarRows(document.getElementById("motor-temp-bars"), MOTOR_ORDER);
+const tauRows = buildBarRows(document.getElementById("motor-tau-bars"), MOTOR_ORDER);
+
+let prevMode = null;
+const alertedMotors = new Set();
+const TEMP_ALERT_C = 55;
+
+function updateClock() {
+  document.getElementById("clock").textContent = new Date().toLocaleTimeString("hu-HU");
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// ---------------------------------------------------------------------
+// "Wow"-réteg: hero-flash, parancs-toast+glitch, punch-animáció,
+// presenter-mód, hőtérkép a robot testén — a 2026-09-04-i vizuális
+// workflow-brainstorm szintézise alapján (ld. docs/14-capability-showcase-projekt.md),
+// mert a felhasználó visszajelzése szerint a korábbi verzió "bunch of
+// data thrown to the screen" volt, nem élmény.
+// ---------------------------------------------------------------------
+function flashHero(text, color, holdMs = 1800) {
+  const el = document.getElementById("hero-flash");
+  el.textContent = text;
+  el.style.color = color;
+  el.style.opacity = 1;
+  el.style.transform = "translate(-50%, -50%) scale(1)";
+  clearTimeout(flashHero._t);
+  flashHero._t = setTimeout(() => {
+    el.style.opacity = 0;
+    el.style.transform = "translate(-50%, -50%) scale(.85)";
+  }, holdMs);
+}
+
+function showCommandBanner(label) {
+  const t = document.getElementById("command-toast");
+  t.textContent = "PARANCS: " + label.toUpperCase();
+  t.style.top = "0";
+  const g = document.getElementById("glitch-overlay");
+  g.classList.remove("active");
+  void g.offsetWidth; // reflow, hogy az animáció újra lejátszható legyen
+  g.classList.add("active");
+  clearTimeout(showCommandBanner._t);
+  showCommandBanner._t = setTimeout(() => { t.style.top = "-60px"; }, 1400);
+}
+
+function setPunch(el, text) {
+  if (el.textContent === text) return;
+  el.textContent = text;
+  el.classList.remove("punch");
+  void el.offsetWidth;
+  el.classList.add("punch");
+}
+
+const _heatColor = new THREE.Color();
+function lerpHeatColor(t) {
+  const pct = Math.min(1, Math.max(0, (t - 20) / 50));
+  if (pct < 0.5) _heatColor.lerpColors(new THREE.Color(0x7bffb0), new THREE.Color(0xffb84d), pct * 2);
+  else _heatColor.lerpColors(new THREE.Color(0xffb84d), new THREE.Color(0xff5566), (pct - 0.5) * 2);
+  return _heatColor;
+}
+
+// Presenter mód: a diagnosztikai csúszkák (pontméret/zoom/kamera-fagyasztás)
+// alapból rejtve vannak élő bemutatóhoz — ?debug=1 URL-paraméterrel vagy
+// a 'd' billentyűvel hívhatók elő, amikor tényleg fejlesztői ellenőrzés kell.
+const _params = new URLSearchParams(location.search);
+if (_params.get("debug") === "1") {
+  document.getElementById("lidar-debug-panel").style.display = "block";
+}
+window.addEventListener("keydown", (e) => {
+  if (e.key === "d") {
+    const p = document.getElementById("lidar-debug-panel");
+    p.style.display = p.style.display === "none" || !p.style.display ? "block" : "none";
+  }
+});
+
+// ---------------------------------------------------------------------
+// Boot-szekvencia — csak indításkor fut le egyszer, aztán elhalványul.
+// Tisztán frontend animáció, nincs szerver-hívás.
+// ---------------------------------------------------------------------
+const BOOT_LINES = [
+  "INITIALIZING JOINT TELEMETRY...",
+  "CONNECTING TO DDS CHANNEL...",
+  "IMU CALIBRATED",
+  "LIDAR ONLINE",
+  "CAMERA FEED LINKED",
+  "NERO_GO2 CAPABILITY SHOWCASE — READY",
+];
+(function runBoot() {
+  const el = document.getElementById("boot-lines");
+  let i = 0;
+  function next() {
+    if (i >= BOOT_LINES.length) {
+      setTimeout(() => document.getElementById("boot-overlay").classList.add("hidden"), 400);
+      return;
+    }
+    const line = document.createElement("div");
+    line.textContent = BOOT_LINES[i];
+    if (i < BOOT_LINES.length - 1) line.className = "done";
+    el.appendChild(line);
+    i++;
+    setTimeout(next, i === BOOT_LINES.length ? 500 : 320);
+  }
+  next();
+})();
+
+// ---------------------------------------------------------------------
+// Gait állapotgép diagram — a mode_label alapján kiemeli az aktuális
+// fázist a lehetséges póz-repertoárban.
+// ---------------------------------------------------------------------
+const GAIT_STATES = ["Állás", "Séta", "Integetés", "Ülés", "Köszöntés (\"szív\")"];
+(function buildGaitFsm() {
+  const el = document.getElementById("gait-fsm");
+  GAIT_STATES.forEach((s, i) => {
+    const box = document.createElement("span");
+    box.className = "state";
+    box.dataset.state = s;
+    box.textContent = s;
+    el.appendChild(box);
+    if (i < GAIT_STATES.length - 1) {
+      const arrow = document.createElement("span");
+      arrow.className = "arrow";
+      arrow.textContent = "→";
+      el.appendChild(arrow);
+    }
+  });
+})();
+
+// ---------------------------------------------------------------------
+// IMU mesterséges horizont — repülőgép-HUD-szerű, roll/pitch alapján
+// forgatott/eltolt horizontvonal, 2D canvas-transzformációval.
+// ---------------------------------------------------------------------
+const horizonCtx = document.getElementById("horizon-canvas").getContext("2d");
+function drawHorizon(roll, pitch) {
+  const w = 140, h = 90;
+  horizonCtx.clearRect(0, 0, w, h);
+  horizonCtx.save();
+  horizonCtx.translate(w / 2, h / 2);
+  horizonCtx.rotate(-roll);
+  const pitchOffset = Math.max(-30, Math.min(30, (pitch || 0) * 57.2958 * 2));
+  horizonCtx.fillStyle = "#0d2230";
+  horizonCtx.fillRect(-100, pitchOffset - 100, 200, 100);
+  horizonCtx.fillStyle = "#241a0d";
+  horizonCtx.fillRect(-100, pitchOffset, 200, 100);
+  horizonCtx.strokeStyle = "#22e5ff";
+  horizonCtx.lineWidth = 2;
+  horizonCtx.beginPath();
+  horizonCtx.moveTo(-100, pitchOffset);
+  horizonCtx.lineTo(100, pitchOffset);
+  horizonCtx.stroke();
+  horizonCtx.restore();
+  // rögzített referencia-jelölő (a robot orra)
+  horizonCtx.strokeStyle = "#7bffb0";
+  horizonCtx.lineWidth = 2;
+  horizonCtx.beginPath();
+  horizonCtx.moveTo(w / 2 - 14, h / 2);
+  horizonCtx.lineTo(w / 2 - 4, h / 2);
+  horizonCtx.moveTo(w / 2 + 4, h / 2);
+  horizonCtx.lineTo(w / 2 + 14, h / 2);
+  horizonCtx.stroke();
+}
+
+// ---------------------------------------------------------------------
+// Teljesítmény: P = |τ·ω| izületenként összegezve, Wh-ban integrálva.
+// ω-t a motor_q két egymást követő SSE-keret közti különbségéből
+// becsüljük (véges differencia) — valós mérnöki formula, szintetikus
+// bemeneten.
+// ---------------------------------------------------------------------
+let prevQ = null, prevT = null, energyWh = 0;
+const powerHistory = [];
+const powerCtx = document.getElementById("power-canvas").getContext("2d");
+
+function drawPowerSparkline() {
+  const w = powerCtx.canvas.width, h = powerCtx.canvas.height;
+  powerCtx.clearRect(0, 0, w, h);
+  if (powerHistory.length < 2) return;
+  const maxP = Math.max(20, ...powerHistory);
+  powerCtx.strokeStyle = "#22e5ff";
+  powerCtx.lineWidth = 1.5;
+  powerCtx.beginPath();
+  powerHistory.forEach((p, i) => {
+    const x = (i / (powerHistory.length - 1)) * w;
+    const y = h - (p / maxP) * h;
+    if (i === 0) powerCtx.moveTo(x, y); else powerCtx.lineTo(x, y);
+  });
+  powerCtx.stroke();
+}
+
+function updatePower(q, tau) {
+  const now = performance.now ? performance.now() / 1000 : Date.now() / 1000;
+  if (prevQ && prevT) {
+    const dt = Math.max(0.001, now - prevT);
+    let totalP = 0;
+    for (let i = 0; i < 12; i++) {
+      const omega = (q[i] - prevQ[i]) / dt;
+      totalP += Math.abs((tau[i] || 0) * omega);
+    }
+    energyWh += (totalP * dt) / 3600;
+    powerHistory.push(totalP);
+    if (powerHistory.length > 80) powerHistory.shift();
+    drawPowerSparkline();
+    document.getElementById("v-power").textContent = totalP.toFixed(1) + " W";
+    document.getElementById("v-energy").textContent = energyWh.toFixed(3) + " Wh";
+  }
+  prevQ = q.slice();
+  prevT = now;
+}
+
+// ---------------------------------------------------------------------
+// Kézi vezérlőpult — az index.html (fő vezérlőpult) bevált joystick +
+// arm/disarm + akció-gomb logikájának egy az egyben átemelése, ugyanazokra
+// a meglévő végpontokra kötve (/arm, /disarm, /update_joystick, /run_action).
+// ---------------------------------------------------------------------
+(function setupControlPanel() {
+  let ctlArmed = false;
+
+  function setArmedUI(isArmed) {
+    ctlArmed = isArmed;
+    const btn = document.getElementById("ctl-arm-btn");
+    btn.textContent = isArmed ? "🔓 Feloldva — kattints a zároláshoz" : "🔒 Zárolva — kattints a feloldáshoz";
+    btn.classList.toggle("armed", isArmed);
+    document.querySelectorAll("#control-panel .ctl-actions button").forEach((b) => (b.disabled = !isArmed));
+    document.querySelectorAll("#control-panel .stick-base").forEach((el) => el.classList.toggle("disabled", !isArmed));
+  }
+
+  document.getElementById("ctl-arm-btn").addEventListener("click", () => {
+    fetch(ctlArmed ? "/disarm" : "/arm", { method: "POST" })
+      .then((r) => r.json())
+      .then((d) => { if (!d.error) setArmedUI(!ctlArmed); else alert(d.error); })
+      .catch(() => {});
+  });
+
+  document.querySelectorAll("#control-panel .ctl-actions button").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      fetch("/run_action/" + btn.dataset.action, { method: "POST" }).catch(() => {});
+    });
+  });
+
+  // Kamera méret és összecsukás
+  const camPanel = document.getElementById("cam-panel");
+  const camSizeBtn = document.getElementById("dock-size-toggle-btn");
+  let isCam2X = true;
+  if (camSizeBtn && camPanel) {
+    camSizeBtn.addEventListener("click", () => {
+      isCam2X = !isCam2X;
+      camPanel.classList.toggle("cam-compact", !isCam2X);
+      camSizeBtn.textContent = isCam2X ? "2X" : "1X";
+    });
+  }
+  const camFoldBtn = document.getElementById("cam-fold-btn");
+  let isCamFolded = false;
+  if (camFoldBtn && camPanel) {
+    camFoldBtn.addEventListener("click", () => {
+      isCamFolded = !isCamFolded;
+      camPanel.classList.toggle("cam-folded", isCamFolded);
+      camFoldBtn.textContent = isCamFolded ? "▼" : "▲";
+    });
+  }
+
+  // Alsó vezérlő összecsukása / kinyitása
+  const ctlPanel = document.getElementById("control-panel");
+  const ctlFoldBtn = document.getElementById("ctl-fold-btn");
+  let isCtlFolded = false;
+  if (ctlFoldBtn && ctlPanel) {
+    ctlFoldBtn.addEventListener("click", () => {
+      isCtlFolded = !isCtlFolded;
+      ctlPanel.classList.toggle("ctl-minimized", isCtlFolded);
+      ctlFoldBtn.textContent = isCtlFolded ? "▲" : "▼";
+      ctlFoldBtn.title = isCtlFolded ? "Vezérlő kinyitása" : "Vezérlő összecsukása";
+    });
+  }
+
+  // Hesai popover és csúszkák
+  const hesaiPop = document.getElementById("hesai-settings-popover");
+  const hesaiToggleBtn = document.getElementById("hesai-settings-toggle-btn");
+  const hesaiCloseBtn = document.getElementById("hesai-pop-close-btn");
+  if (hesaiToggleBtn && hesaiPop) {
+    hesaiToggleBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      hesaiPop.classList.toggle("open");
+    });
+  }
+  if (hesaiCloseBtn && hesaiPop) {
+    hesaiCloseBtn.addEventListener("click", () => hesaiPop.classList.remove("open"));
+  }
+  document.addEventListener("click", (e) => {
+    if (hesaiPop && hesaiPop.classList.contains("open") && !hesaiPop.contains(e.target) && e.target !== hesaiToggleBtn) {
+      hesaiPop.classList.remove("open");
+    }
+  });
+
+  const popMaxSlider = document.getElementById("hesai-pop-max-slider");
+  const popMaxVal = document.getElementById("hesai-pop-max-val");
+  if (popMaxSlider && popMaxVal) {
+    popMaxSlider.addEventListener("input", () => {
+      const v = parseInt(popMaxSlider.value, 10);
+      window._calib.hesaiMaxPoints = v;
+      popMaxVal.textContent = v.toLocaleString("hu-HU") + " pont";
+    });
+  }
+
+  const popPersistSlider = document.getElementById("hesai-pop-persist-slider");
+  const popPersistVal = document.getElementById("hesai-pop-persist-val");
+  if (popPersistSlider && popPersistVal) {
+    popPersistSlider.addEventListener("input", () => {
+      const v = parseFloat(popPersistSlider.value);
+      window._calib.hesaiPersistSec = v;
+      popPersistVal.textContent = v.toFixed(1) + " s";
+      const sidebarPersist = document.getElementById("calib-hesai-persist");
+      if (sidebarPersist) sidebarPersist.value = v;
+      const sidebarPersistVal = document.getElementById("calib-hesai-persist-val");
+      if (sidebarPersistVal) sidebarPersistVal.textContent = v.toFixed(1) + " s";
+    });
+  }
+
+  const popSizeSlider = document.getElementById("hesai-pop-size-slider");
+  const popSizeVal = document.getElementById("hesai-pop-size-val");
+  if (popSizeSlider && popSizeVal) {
+    popSizeSlider.addEventListener("input", () => {
+      const v = parseFloat(popSizeSlider.value);
+      if (typeof hesaiMaterial !== "undefined") hesaiMaterial.size = v;
+      popSizeVal.textContent = v.toFixed(3);
+    });
+  }
+
+  const popFreezeBtn = document.getElementById("hesai-pop-freeze-btn");
+  if (popFreezeBtn) {
+    popFreezeBtn.addEventListener("click", () => {
+      window._calib.hesaiFreeze = !window._calib.hesaiFreeze;
+      popFreezeBtn.textContent = window._calib.hesaiFreeze ? "❄️ Fagyasztva: BE" : "❄️ Fagyasztás";
+      popFreezeBtn.style.background = window._calib.hesaiFreeze ? "rgba(34,229,255,0.2)" : "rgba(255,255,255,0.05)";
+      popFreezeBtn.style.borderColor = window._calib.hesaiFreeze ? "var(--accent)" : "var(--border)";
+      const topFreeze = document.getElementById("hesai-freeze-btn");
+      if (topFreeze) {
+        topFreeze.textContent = window._calib.hesaiFreeze ? "❄️ Freeze: BE" : "❄️ Freeze: KI";
+        topFreeze.classList.toggle("active-view", window._calib.hesaiFreeze);
+      }
+    });
+  }
+
+  // Hesai forgási frekvencia (Spin Rate: 5 Hz / 10 Hz / 20 Hz)
+  const spinValEl = document.getElementById("hesai-pop-spin-val");
+  const spin5Btn = document.getElementById("hesai-spin-5hz-btn");
+  const spin10Btn = document.getElementById("hesai-spin-10hz-btn");
+  const spin20Btn = document.getElementById("hesai-spin-20hz-btn");
+
+  function updateSpinUI(valStr) {
+    const is5 = valStr === "1";
+    const is10 = valStr === "2";
+    const is20 = valStr === "3";
+    if (spinValEl) {
+      spinValEl.textContent = is5 ? "5 Hz (300 rpm — 2x sűrűbb)" : (is10 ? "10 Hz (600 rpm — normál)" : "20 Hz (1200 rpm — gyors)");
+      spinValEl.style.color = is5 ? "#22e5ff" : (is10 ? "#bb66ff" : "#ffaa00");
+    }
+    if (spin5Btn) {
+      spin5Btn.classList.toggle("active", is5);
+      spin5Btn.style.borderColor = is5 ? "#22e5ff" : "var(--border)";
+      spin5Btn.style.color = is5 ? "#22e5ff" : "var(--muted)";
+    }
+    if (spin10Btn) {
+      spin10Btn.classList.toggle("active", is10);
+      spin10Btn.style.borderColor = is10 ? "#bb66ff" : "var(--border)";
+      spin10Btn.style.color = is10 ? "#bb66ff" : "var(--muted)";
+    }
+    if (spin20Btn) {
+      spin20Btn.classList.toggle("active", is20);
+      spin20Btn.style.borderColor = is20 ? "#ffaa00" : "var(--border)";
+      spin20Btn.style.color = is20 ? "#ffaa00" : "var(--muted)";
+    }
+  }
+
+  async function fetchSpinSpeed() {
+    try {
+      const res = await fetch("/api/hesai/spin_speed");
+      const data = await res.json();
+      if (data.status === "ok" && data.spin_speed) {
+        updateSpinUI(String(data.spin_speed));
+      }
+    } catch (e) {
+      console.warn("Hesai spin speed lekérdezési hiba:", e);
+    }
+  }
+
+  async function setSpinSpeed(valStr) {
+    updateSpinUI(valStr);
+    try {
+      const res = await fetch("/api/hesai/spin_speed", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value: valStr })
+      });
+      const data = await res.json();
+      if (data.status === "ok") {
+        fetchSpinSpeed();
+      }
+    } catch (e) {
+      console.warn("Hesai spin speed beállítási hiba:", e);
+    }
+  }
+
+  if (spin5Btn) spin5Btn.addEventListener("click", () => setSpinSpeed("1"));
+  if (spin10Btn) spin10Btn.addEventListener("click", () => setSpinSpeed("2"));
+  if (spin20Btn) spin20Btn.addEventListener("click", () => setSpinSpeed("3"));
+
+  fetchSpinSpeed();
+
+  function setupStick(elId, stickId) {
+    const base = document.getElementById(elId);
+    const knob = base.querySelector(".stick-knob");
+    let dragging = false;
+
+    function send(x, y) {
+      if (!ctlArmed) return;
+      fetch("/update_joystick", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stickId, x, y }),
+      }).catch(() => {});
+    }
+
+    function move(clientX, clientY) {
+      const rect = base.getBoundingClientRect();
+      const radius = base.clientWidth / 2;
+      const knobRadius = knob.clientWidth / 2 || 19;
+      let dx = clientX - (rect.left + radius);
+      let dy = clientY - (rect.top + radius);
+      const maxDist = Math.max(1, radius - knobRadius);
+      const dist = Math.min(Math.hypot(dx, dy), maxDist);
+      const angle = Math.atan2(dy, dx);
+      dx = Math.cos(angle) * dist;
+      dy = Math.sin(angle) * dist;
+      knob.style.transform = `translate(${dx - knobRadius}px, ${dy - knobRadius}px)`;
+      send(dx / maxDist, dy / maxDist);
+    }
+
+    function reset() {
+      knob.style.transform = "translate(-50%, -50%)";
+      send(0, 0);
+    }
+
+    base.addEventListener("pointerdown", (e) => {
+      if (!ctlArmed) return;
+      dragging = true;
+      base.setPointerCapture(e.pointerId);
+      move(e.clientX, e.clientY);
+    });
+    base.addEventListener("pointermove", (e) => { if (dragging) move(e.clientX, e.clientY); });
+    base.addEventListener("pointerup", () => { dragging = false; reset(); });
+    base.addEventListener("pointercancel", () => { dragging = false; reset(); });
+  }
+
+  setupStick("ctl-stick1", "stick1");
+  setupStick("ctl-stick2", "stick2");
+
+  // -------------------------------------------------------------------
+  // Billentyűzet-vezérlés — WASD mozgás (stick1) + Q/E forgás (stick2),
+  // 2026-09-04: a user explicit kérése a joystick mellé. Ugyanarra a
+  // /update_joystick végpontra küld, mint az érintős stick — a szerver
+  // nem tud különbséget tenni a bemeneti eszköz között.
+  // -------------------------------------------------------------------
+  const KEY_MAP = { w: "w", a: "a", s: "s", d: "d", q: "q", e: "e" };
+  const heldKeys = new Set();
+  const knob1 = document.querySelector("#ctl-stick1 .stick-knob");
+  const knob2 = document.querySelector("#ctl-stick2 .stick-knob");
+  let kbInterval = null;
+
+  function sendStick(stickId, x, y) {
+    if (!ctlArmed) return;
+    fetch("/update_joystick", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stickId, x, y }),
+    }).catch(() => {});
+  }
+
+  function applyKeyboardState() {
+    let sx = (heldKeys.has("d") ? 1 : 0) - (heldKeys.has("a") ? 1 : 0);
+    let sy = (heldKeys.has("s") ? 1 : 0) - (heldKeys.has("w") ? 1 : 0);
+    if (sx && sy) { sx *= 0.7071; sy *= 0.7071; } // átlós irány normalizálás
+    const yawSx = (heldKeys.has("e") ? 1 : 0) - (heldKeys.has("q") ? 1 : 0);
+
+    const base1 = document.getElementById("ctl-stick1");
+    const base2 = document.getElementById("ctl-stick2");
+    const kr1 = (knob1 && knob1.clientWidth / 2) || 19;
+    const kr2 = (knob2 && knob2.clientWidth / 2) || 19;
+    const maxD1 = Math.max(1, ((base1 && base1.clientWidth / 2) || 40) - kr1);
+    const maxD2 = Math.max(1, ((base2 && base2.clientWidth / 2) || 40) - kr2);
+
+    if (knob1) knob1.style.transform = `translate(${sx * maxD1 - kr1}px, ${sy * maxD1 - kr1}px)`;
+    if (knob2) knob2.style.transform = `translate(${yawSx * maxD2 - kr2}px, ${-kr2}px)`;
+
+    sendStick("stick1", sx, sy);
+    sendStick("stick2", yawSx, 0);
+  }
+
+  window.addEventListener("keydown", (e) => {
+    const k = KEY_MAP[e.key.toLowerCase()];
+    if (!k || !ctlArmed || heldKeys.has(k)) return;
+    heldKeys.add(k);
+    applyKeyboardState();
+    if (!kbInterval) kbInterval = setInterval(applyKeyboardState, 150); // a fizikai joystickkal egyező folyamatos "élő" jelzés
+  });
+  window.addEventListener("keyup", (e) => {
+    const k = KEY_MAP[e.key.toLowerCase()];
+    if (!k) return;
+    heldKeys.delete(k);
+    applyKeyboardState();
+    if (heldKeys.size === 0 && kbInterval) { clearInterval(kbInterval); kbInterval = null; }
+  });
+  // Ha lezárjuk a vezérlést, a lenyomva tartott billentyűk ne ragadjanak be.
+  window.addEventListener("blur", () => { heldKeys.clear(); if (kbInterval) { clearInterval(kbInterval); kbInterval = null; } });
+
+  window._showcaseControlSetArmedUI = setArmedUI;
+})();
+
+// ---------------------------------------------------------------------
+// Mozgás Makró & Útvonal Rögzítő / Visszajátszó (Macros)
+// ---------------------------------------------------------------------
+(function setupMacroSystem() {
+  const recBadge = document.getElementById("macro-rec-badge");
+  const nameInput = document.getElementById("macro-name-input");
+  const recStartBtn = document.getElementById("macro-rec-start-btn");
+  const recWpBtn = document.getElementById("macro-rec-wp-btn");
+  const recStopBtn = document.getElementById("macro-rec-stop-btn");
+  const recTimerEl = document.getElementById("macro-rec-timer");
+  const recCountEl = document.getElementById("macro-rec-count");
+  const recWpCountEl = document.getElementById("macro-rec-wp-count");
+
+  const macroSelect = document.getElementById("macro-select");
+  const refreshBtn = document.getElementById("macro-refresh-btn");
+  const delBtn = document.getElementById("macro-del-btn");
+  const detailsBox = document.getElementById("macro-details");
+  const detDuration = document.getElementById("macro-det-duration");
+  const detDist = document.getElementById("macro-det-dist");
+  const detPoints = document.getElementById("macro-det-points");
+  const detDate = document.getElementById("macro-det-date");
+
+  const speedSlider = document.getElementById("macro-speed-slider");
+  const speedVal = document.getElementById("macro-speed-val");
+  const playBtn = document.getElementById("macro-play-btn");
+  const abortBtn = document.getElementById("macro-abort-btn");
+
+  const progressBox = document.getElementById("macro-progress-box");
+  const playStatus = document.getElementById("macro-play-status");
+  const playPct = document.getElementById("macro-play-pct");
+  const progressBar = document.getElementById("macro-progress-bar");
+
+  let isRecording = false;
+  let isPlaying = false;
+  let pollInterval = null;
+  let currentLoadedMacro = null;
+
+  // 3D Three.js Trajectory Group
+  const macro3DGroup = new THREE.Group();
+  scene.add(macro3DGroup);
+
+  const trajMaterial = new THREE.LineBasicMaterial({ color: 0x22e5ff, linewidth: 2, transparent: true, opacity: 0.85 });
+  const wpGeometry = new THREE.SphereGeometry(0.04, 12, 12);
+  const wpMaterial = new THREE.MeshBasicMaterial({ color: 0xffaa00 });
+  const playbackMarker = new THREE.Mesh(
+    new THREE.SphereGeometry(0.06, 12, 12),
+    new THREE.MeshBasicMaterial({ color: 0x44ff88 })
+  );
+  playbackMarker.visible = false;
+  macro3DGroup.add(playbackMarker);
+
+  let trajLine = null;
+  let wpMeshes = [];
+
+  function clear3DTrajectory() {
+    if (trajLine) {
+      macro3DGroup.remove(trajLine);
+      trajLine.geometry.dispose();
+      trajLine = null;
+    }
+    wpMeshes.forEach(m => {
+      macro3DGroup.remove(m);
+      m.geometry.dispose();
+    });
+    wpMeshes = [];
+    playbackMarker.visible = false;
+  }
+
+  function render3DTrajectory(macro) {
+    clear3DTrajectory();
+    if (!macro) return;
+    const samples = macro.samples || [];
+    const waypoints = macro.waypoints || [];
+
+    if (samples.length > 1) {
+      const points = [];
+      for (const s of samples) {
+        if (typeof s.x === "number" && typeof s.y === "number") {
+          const p = worldToThree(s.x, s.y);
+          points.push(new THREE.Vector3(p.x, p.y, p.z));
+        }
+      }
+      if (points.length > 1) {
+        const geom = new THREE.BufferGeometry().setFromPoints(points);
+        trajLine = new THREE.Line(geom, trajMaterial);
+        macro3DGroup.add(trajLine);
+      }
+    }
+
+    waypoints.forEach(wp => {
+      if (typeof wp.x === "number" && typeof wp.y === "number") {
+        const p = worldToThree(wp.x, wp.y);
+        const mesh = new THREE.Mesh(wpGeometry, wpMaterial);
+        mesh.position.set(p.x, p.y + 0.02, p.z);
+        macro3DGroup.add(mesh);
+        wpMeshes.push(mesh);
+      }
+    });
+  }
+
+  function worldToThree(wx, wy) {
+    const cx = window._liveMapCenterWorld ? window._liveMapCenterWorld.x : 0;
+    const cy = window._liveMapCenterWorld ? window._liveMapCenterWorld.y : 0;
+    const offX = (window._calib && window._calib.robotX) || 0;
+    const offY = (window._calib && window._calib.robotY) || 0;
+    return {
+      x: wx - cx + offX,
+      y: 0.02,
+      z: -(wy - cy) + offY
+    };
+  }
+
+  async function loadMacroList(selectNameAfter) {
+    try {
+      const res = await fetch("/macro/list");
+      const data = await res.json();
+      if (data.status === "ok") {
+        macroSelect.innerHTML = '<option value="">-- Válassz mentett makrót --</option>';
+        data.macros.forEach(m => {
+          const opt = document.createElement("option");
+          opt.value = m.name;
+          const dtStr = m.created_at ? new Date(m.created_at * 1000).toLocaleTimeString("hu-HU", { hour: "2-digit", minute: "2-digit" }) : "";
+          opt.textContent = `${m.name} (${m.duration_s}s, ${m.distance_m}m) [${dtStr}]`;
+          macroSelect.appendChild(opt);
+        });
+        if (selectNameAfter) {
+          macroSelect.value = selectNameAfter;
+          onMacroSelected();
+        }
+      }
+    } catch (e) {
+      console.warn("Makró lista betöltési hiba:", e);
+    }
+  }
+
+  async function onMacroSelected() {
+    const name = macroSelect.value;
+    if (!name) {
+      detailsBox.style.display = "none";
+      playBtn.disabled = true;
+      delBtn.disabled = true;
+      currentLoadedMacro = null;
+      clear3DTrajectory();
+      return;
+    }
+    try {
+      const res = await fetch(`/macro/get/${encodeURIComponent(name)}`);
+      const data = await res.json();
+      if (data.status === "ok" && data.macro) {
+        currentLoadedMacro = data.macro;
+        detDuration.textContent = `${data.macro.duration_s}s`;
+        detDist.textContent = `${data.macro.distance_m} m`;
+        detPoints.textContent = `${data.macro.sample_count} minta (${data.macro.waypoint_count || 0} útpont)`;
+        detDate.textContent = data.macro.created_at ? new Date(data.macro.created_at * 1000).toLocaleString("hu-HU") : "—";
+        detailsBox.style.display = "block";
+        playBtn.disabled = isPlaying || isRecording;
+        delBtn.disabled = isPlaying || isRecording;
+        render3DTrajectory(data.macro);
+      }
+    } catch (e) {
+      console.warn("Makró betöltési hiba:", e);
+    }
+  }
+
+  speedSlider.addEventListener("input", () => {
+    const s = parseFloat(speedSlider.value);
+    let label = `${s.toFixed(1)}x`;
+    if (s <= 0.4) label += " (nagyon lassú / óvatos)";
+    else if (s <= 0.6) label += " (ajánlott / biztonságos)";
+    else if (s <= 0.8) label += " (közepes tempó)";
+    else label += " (100% eredeti sebesség)";
+    speedVal.textContent = label;
+  });
+
+  recStartBtn.addEventListener("click", async () => {
+    const defaultName = `makro_${new Date().toISOString().slice(0,19).replace(/[-:T]/g, "_")}`;
+    const name = nameInput.value.trim() || defaultName;
+    try {
+      const res = await fetch("/macro/record/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name })
+      });
+      const data = await res.json();
+      if (data.error) {
+        alert(data.error);
+        return;
+      }
+      isRecording = true;
+      updateUIState();
+      startPollingStatus();
+    } catch (e) {
+      alert("Hálózati hiba a felvétel indításakor!");
+    }
+  });
+
+  recWpBtn.addEventListener("click", async () => {
+    try {
+      const res = await fetch("/macro/record/waypoint", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({})
+      });
+      const data = await res.json();
+      if (data.status === "ok") {
+        recWpCountEl.textContent = data.waypoint ? data.waypoint.id : "+1";
+        recWpBtn.style.background = "#ffaa00";
+        setTimeout(() => recWpBtn.style.background = "", 200);
+      }
+    } catch (e) {}
+  });
+
+  recStopBtn.addEventListener("click", async () => {
+    const name = nameInput.value.trim();
+    try {
+      const res = await fetch("/macro/record/stop", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name })
+      });
+      const data = await res.json();
+      if (data.error) {
+        alert(data.error);
+        return;
+      }
+      isRecording = false;
+      updateUIState();
+      await loadMacroList(data.macro ? data.macro.name : null);
+    } catch (e) {
+      alert("Hálózati hiba a felvétel leállításakor!");
+    }
+  });
+
+  playBtn.addEventListener("click", async () => {
+    const name = macroSelect.value;
+    if (!name) return;
+    const speed = parseFloat(speedSlider.value) || 0.5;
+    try {
+      const res = await fetch("/macro/play", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, speed })
+      });
+      const data = await res.json();
+      if (data.error) {
+        alert(data.error);
+        return;
+      }
+      isPlaying = true;
+      updateUIState();
+      startPollingStatus();
+    } catch (e) {
+      alert("Hálózati hiba a visszajátszás indításakor!");
+    }
+  });
+
+  abortBtn.addEventListener("click", async () => {
+    try {
+      await fetch("/macro/abort", { method: "POST" });
+      isPlaying = false;
+      updateUIState();
+    } catch (e) {}
+  });
+
+  delBtn.addEventListener("click", async () => {
+    const name = macroSelect.value;
+    if (!name) return;
+    if (!confirm(`Biztosan törölni szeretnéd a(z) '${name}' makrót?`)) return;
+    try {
+      const res = await fetch(`/macro/delete/${encodeURIComponent(name)}`, { method: "POST" });
+      const data = await res.json();
+      if (data.status === "deleted") {
+        clear3DTrajectory();
+        await loadMacroList();
+        onMacroSelected();
+      }
+    } catch (e) {
+      alert("Törlési hiba!");
+    }
+  });
+
+  refreshBtn.addEventListener("click", () => loadMacroList(macroSelect.value));
+  macroSelect.addEventListener("change", onMacroSelected);
+
+  function updateUIState() {
+    recBadge.style.display = isRecording ? "inline-block" : "none";
+    recStartBtn.disabled = isRecording || isPlaying;
+    recWpBtn.disabled = !isRecording;
+    recStopBtn.disabled = !isRecording;
+    nameInput.disabled = isRecording || isPlaying;
+
+    macroSelect.disabled = isRecording || isPlaying;
+    delBtn.disabled = isRecording || isPlaying || !macroSelect.value;
+    playBtn.disabled = isRecording || isPlaying || !macroSelect.value;
+    abortBtn.disabled = !isPlaying;
+
+    if (isPlaying) {
+      progressBox.style.display = "block";
+    } else if (!isRecording) {
+      setTimeout(() => {
+        if (!isPlaying) progressBox.style.display = "none";
+      }, 3000);
+    }
+  }
+
+  function startPollingStatus() {
+    if (pollInterval) return;
+    pollInterval = setInterval(async () => {
+      if (!isRecording && !isPlaying) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+        return;
+      }
+      try {
+        const res = await fetch("/macro/status");
+        const st = await res.json();
+        
+        if (st.recording) {
+          recTimerEl.textContent = `${st.record_time.toFixed(1)}s`;
+          recCountEl.textContent = st.sample_count;
+          recWpCountEl.textContent = st.waypoint_count;
+        } else if (isRecording && !st.recording) {
+          isRecording = false;
+          updateUIState();
+          await loadMacroList();
+        }
+
+        if (st.playing) {
+          isPlaying = true;
+          progressBox.style.display = "block";
+          const prog = st.progress || {};
+          playStatus.textContent = `Lejátszás: ${prog.current_t || 0}s / ${prog.total_t || 0}s`;
+          playPct.textContent = `${prog.pct || 0}%`;
+          progressBar.style.width = `${prog.pct || 0}%`;
+
+          if (currentLoadedMacro && currentLoadedMacro.samples && currentLoadedMacro.samples.length > 0) {
+            const idx = Math.min(
+              currentLoadedMacro.samples.length - 1,
+              Math.floor((prog.pct || 0) / 100 * (currentLoadedMacro.samples.length - 1))
+            );
+            const s = currentLoadedMacro.samples[idx];
+            if (s && typeof s.x === "number" && typeof s.y === "number") {
+              const p = worldToThree(s.x, s.y);
+              playbackMarker.position.set(p.x, p.y + 0.03, p.z);
+              playbackMarker.visible = true;
+            }
+          }
+        } else if (isPlaying && !st.playing) {
+          isPlaying = false;
+          const prog = st.progress || {};
+          if (prog.status === "done") {
+            playStatus.textContent = "Lejátszás sikeresen befejeződött!";
+            playPct.textContent = "100%";
+            progressBar.style.width = "100%";
+          } else if (prog.status === "aborted") {
+            playStatus.textContent = "Lejátszás megszakítva (Abort)";
+          }
+          playbackMarker.visible = false;
+          updateUIState();
+        }
+      } catch (e) {}
+    }, 200);
+  }
+
+  loadMacroList();
+})();
+
+
+// ---------------------------------------------------------------------
+// "Robotporszívó mód" (demo) — 2026-09-04 esti előkészítés a másnapi
+// bemutatóhoz. Statikus térkép-PNG háttér (nincs élő occupancy-grid ma
+// este, ld. beszélgetés) + a robot élő pozíciója (piros pötty, a
+// /showcase_data SSE-ből, ami mock módban egy szimulált körpályát ad).
+// Kattintásra: "azonnali" módban egyből navigál, "útvonal-lista" módban
+// pontokat gyűjt, amiket a /api/navigate {queue:[...]} indít el.
+// ---------------------------------------------------------------------
+(function setupPatrolPanel() {
+  const canvas = document.getElementById("patrol-canvas");
+  const ctx = canvas.getContext("2d");
+  const statusEl = document.getElementById("v-nav-status");
+  const modeEl = document.getElementById("v-nav-mode");
+  const listEl = document.getElementById("nav-waypoint-list");
+  const btnImmediate = document.getElementById("nav-mode-immediate");
+  const btnScript = document.getElementById("nav-mode-script");
+  const btnRun = document.getElementById("nav-script-run");
+  const btnClear = document.getElementById("nav-script-clear");
+
+  let mapImg = null;
+  let mapMeta = null;  // {width, height, resolution, origin_x, origin_y}
+  let mode = "immediate";
+  let scriptPoints = [];  // [{x, y}] világ-koordinátákban, összegyűjtve kattintással
+  let robotPose = { x: null, y: null, yaw: 0 };
+  let armed = false;
+
+  // 2026-09-05: ÉLŐ occupancy grid (/live_map_data, ld. app.py
+  // _live_map_thread) — a tegnap esti build_map.py logika élő verziója,
+  // valós hesai_bridge + valós SDK-odometria alapján. A statikus PNG
+  // fallback megszűnt.
+  function drawGridToOffscreen(grid) {
+    const off = document.createElement("canvas");
+    off.width = grid.width; off.height = grid.height;
+    const octx = off.getContext("2d");
+    const img = octx.createImageData(grid.width, grid.height);
+    for (let i = 0; i < grid.data.length; i++) {
+      const v = grid.data[i];
+      let r, g, b;
+      if (v < 0) { r = 15; g = 22; b = 31; }
+      else if (v < 50) { r = 15; g = 30; b = 40; }
+      else { r = 123; g = 255; b = 176; }
+      const row = grid.height - 1 - Math.floor(i / grid.width);
+      const col = i % grid.width;
+      const p = (row * grid.width + col) * 4;
+      img.data[p] = r; img.data[p + 1] = g; img.data[p + 2] = b; img.data[p + 3] = 255;
+    }
+    octx.putImageData(img, 0, 0);
+    return off;
+  }
+
+  const liveMapEs = new EventSource("/live_map_data");
+  liveMapEs.onmessage = (ev) => {
+    const d = JSON.parse(ev.data);
+    if (typeof updateLiveMapFloor === "function") updateLiveMapFloor(d);
+    if (!d.ready) {
+      statusEl.textContent = "élő térkép még épül...";
+      return;
+    }
+    mapMeta = { width: d.width, height: d.height, resolution: d.resolution, origin_x: d.origin_x, origin_y: d.origin_y };
+    mapImg = drawGridToOffscreen(d);
+    if (typeof d.robot_x === "number" && typeof d.robot_y === "number") {
+      robotPose = { x: d.robot_x, y: d.robot_y, yaw: d.robot_yaw || 0 };
+    }
+    redraw();
+  };
+
+  // Az occupancy grid (build_map.py-hoz hasonlóan) függőlegesen tükrözve van
+  // mentve/rajzolva (Y felfelé nő a világban, a kép/canvas Y-tengelye
+  // lefelé) — ugyanazt a transzformot alkalmazzuk itt is, világ->canvas
+  // pixel irányba.
+  function worldToCanvas(wx, wy) {
+    const scale = Math.min(canvas.width / mapMeta.width, canvas.height / mapMeta.height);
+    const dw = mapMeta.width * scale, dh = mapMeta.height * scale;
+    const ox = (canvas.width - dw) / 2, oy = (canvas.height - dh) / 2;
+    const gx = (wx - mapMeta.origin_x) / mapMeta.resolution;
+    const gy = mapMeta.height - 1 - (wy - mapMeta.origin_y) / mapMeta.resolution;
+    return [ox + gx * scale, oy + gy * scale, scale];
+  }
+
+  function canvasToWorld(px, py) {
+    const scale = Math.min(canvas.width / mapMeta.width, canvas.height / mapMeta.height);
+    const dw = mapMeta.width * scale, dh = mapMeta.height * scale;
+    const ox = (canvas.width - dw) / 2, oy = (canvas.height - dh) / 2;
+    const gx = (px - ox) / scale;
+    const gy = (py - oy) / scale;
+    const wx = mapMeta.origin_x + gx * mapMeta.resolution;
+    const wy = mapMeta.origin_y + (mapMeta.height - 1 - gy) * mapMeta.resolution;
+    return [wx, wy];
+  }
+
+  function redraw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!mapImg || !mapMeta) {
+      ctx.fillStyle = "#5f7386";
+      ctx.font = "11px Consolas, monospace";
+      ctx.fillText("térkép betöltése...", 10, canvas.height / 2);
+      return;
+    }
+    const scale = Math.min(canvas.width / mapMeta.width, canvas.height / mapMeta.height);
+    const dw = mapMeta.width * scale, dh = mapMeta.height * scale;
+    const ox = (canvas.width - dw) / 2, oy = (canvas.height - dh) / 2;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(mapImg, ox, oy, dw, dh);
+
+    // Útvonal-lista pontok (script mód) — sárga számozott jelölők.
+    scriptPoints.forEach((p, i) => {
+      const [cx, cy] = worldToCanvas(p.x, p.y);
+      ctx.fillStyle = "#ffd23f";
+      ctx.beginPath();
+      ctx.arc(cx, cy, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#05070a";
+      ctx.font = "9px Consolas, monospace";
+      ctx.fillText(String(i + 1), cx - 3, cy + 3);
+    });
+
+    // Robot élő pozíciója — piros pötty + irány-nyíl.
+    if (robotPose.x !== null && robotPose.y !== null) {
+      const [rcx, rcy] = worldToCanvas(robotPose.x, robotPose.y);
+      ctx.save();
+      ctx.translate(rcx, rcy);
+      ctx.rotate(-robotPose.yaw);
+      ctx.fillStyle = "#ff3b3b";
+      ctx.beginPath();
+      ctx.moveTo(8, 0);
+      ctx.lineTo(-5, 5);
+      ctx.lineTo(-5, -5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  canvas.addEventListener("click", (e) => {
+    if (!mapMeta) return;
+    if (!armed) {
+      statusEl.textContent = "előbb oldd fel a kézi vezérlést (lakat-gomb)";
+      return;
+    }
+    const rect = canvas.getBoundingClientRect();
+    const px = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const py = (e.clientY - rect.top) * (canvas.height / rect.height);
+    const [wx, wy] = canvasToWorld(px, py);
+
+    if (mode === "immediate") {
+      fetch("/api/navigate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ x: wx, y: wy }),
+      }).then((r) => r.json()).then((d) => {
+        statusEl.textContent = d.error ? d.error : `célpont: (${wx.toFixed(2)}, ${wy.toFixed(2)})`;
+      });
+    } else {
+      const photoCheckbox = document.getElementById("nav-next-photo");
+      const action = photoCheckbox.checked ? "photo" : null;
+      scriptPoints.push({ x: wx, y: wy, action });
+      photoCheckbox.checked = false;
+      renderWaypointList();
+      redraw();
+    }
+  });
+
+  function renderWaypointList() {
+    listEl.innerHTML = scriptPoints.map((p, i) => `${i + 1}. (${p.x.toFixed(2)}, ${p.y.toFixed(2)})${p.action === "photo" ? " 📷" : ""}`).join("<br>");
+    btnRun.disabled = scriptPoints.length === 0;
+  }
+
+  btnImmediate.addEventListener("click", () => {
+    mode = "immediate";
+    btnImmediate.classList.add("active");
+    btnScript.classList.remove("active");
+    modeEl.textContent = "azonnali";
+  });
+  btnScript.addEventListener("click", () => {
+    mode = "script";
+    btnScript.classList.add("active");
+    btnImmediate.classList.remove("active");
+    modeEl.textContent = "útvonal-lista";
+  });
+  btnRun.addEventListener("click", () => {
+    if (!armed || scriptPoints.length === 0) return;
+    fetch("/api/navigate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ queue: scriptPoints }),
+    }).then((r) => r.json()).then((d) => {
+      statusEl.textContent = d.error ? d.error : `lista indítva (${scriptPoints.length} pont)`;
+    });
+  });
+  btnClear.addEventListener("click", () => {
+    scriptPoints = [];
+    renderWaypointList();
+    redraw();
+    fetch("/api/navigate/cancel", { method: "POST" });
+  });
+
+  document.getElementById("estop-btn").addEventListener("click", () => {
+    fetch("/api/estop", { method: "POST" }).then(() => {
+      statusEl.textContent = "VÉSZLEÁLLÍTVA";
+      scriptPoints = [];
+      renderWaypointList();
+      redraw();
+    });
+  });
+
+  // Állapot-lekérdezés 1 Hz-en — kevésbé kritikus adat, nem éri meg rá
+  // külön SSE-csatornát nyitni a meglévők mellé.
+  const photoListEl = document.getElementById("photo-events-list");
+  let lastPhotoUrl = null;
+  setInterval(() => {
+    fetch("/nav_status").then((r) => r.json()).then((d) => {
+      if (d.target) {
+        statusEl.textContent = `halad: (${d.target.x.toFixed(2)}, ${d.target.y.toFixed(2)}) — ${d.queue_len} hátra`;
+      } else if (d.last_status && d.last_status.type === "reached") {
+        statusEl.textContent = "célba ért";
+      } else if (d.last_status && d.last_status.type === "estop") {
+        statusEl.textContent = "VÉSZLEÁLLÍTVA";
+      } else if (!d.target) {
+        statusEl.textContent = "várakozik";
+      }
+      // Fotó-akció esemény — új képet ad a szerver, amikor egy "photo"
+      // akciójú waypointot elér a navigáció (ld. app.py _capture_photo()).
+      if (d.last_status && d.last_status.photo_url && d.last_status.photo_url !== lastPhotoUrl) {
+        lastPhotoUrl = d.last_status.photo_url;
+        const thumb = document.createElement("img");
+        thumb.src = lastPhotoUrl + "?t=" + Date.now();
+        thumb.style.cssText = "width:70px; height:52px; object-fit:cover; border-radius:3px; border:1px solid var(--accent);";
+        photoListEl.prepend(thumb);
+      }
+    }).catch(() => {});
+  }, 1000);
+
+  window._patrolUpdate = (x, y, yaw, isArmed) => {
+    // A robotPose-t mostantól a /live_map_data adja (élő adat) — itt csak
+    // az armed-jelzőt szinkronizáljuk, hogy a kattintás-kapu naprakész legyen.
+    armed = !!isArmed;
+    redraw();
+  };
+})();
+
+// ---------------------------------------------------------------------
+// Security mód (demo) — 2026-09-04, szimulált "person" detekció, ld.
+// mock_streams.mock_detection(). Holnap reggel a /security_status
+// backend-válasz alakja NEM változik (detected/bbox/confidence), csak a
+// mock_detection() hívás cserélendő valós CV-kimenetre.
+// ---------------------------------------------------------------------
+(function setupSecurityPanel() {
+  const toggleBtn = document.getElementById("security-toggle-btn");
+  const overlay = document.getElementById("security-overlay");
+  const octx = overlay.getContext("2d");
+  const camImg = document.getElementById("cam-feed");
+  const logList = document.getElementById("security-log-list");
+  let active = false;
+  let lastEventT = null;
+
+  function resizeOverlay() {
+    overlay.width = camImg.clientWidth || 220;
+    overlay.height = camImg.clientHeight || 165;
+  }
+  window.addEventListener("resize", resizeOverlay);
+  resizeOverlay();
+
+  toggleBtn.addEventListener("click", () => {
+    active = !active;
+    fetch(active ? "/api/security/start" : "/api/security/stop", { method: "POST" });
+    toggleBtn.style.borderColor = active ? "var(--danger)" : "var(--border)";
+    toggleBtn.style.color = active ? "var(--danger)" : "var(--muted)";
+    if (!active) { octx.clearRect(0, 0, overlay.width, overlay.height); }
+  });
+
+  function drawBox(bbox, confidence) {
+    resizeOverlay();
+    octx.clearRect(0, 0, overlay.width, overlay.height);
+    if (!bbox) return;
+    const [x0, y0, x1, y1] = bbox;
+    const px0 = x0 * overlay.width, py0 = y0 * overlay.height;
+    const pw = (x1 - x0) * overlay.width, ph = (y1 - y0) * overlay.height;
+    octx.strokeStyle = "#ff3b3b";
+    octx.lineWidth = 2;
+    octx.strokeRect(px0, py0, pw, ph);
+    // sci-fi sarok-jelölők
+    const s = 10;
+    octx.beginPath();
+    [[px0, py0, 1, 1], [px0 + pw, py0, -1, 1], [px0, py0 + ph, 1, -1], [px0 + pw, py0 + ph, -1, -1]].forEach(([cx, cy, dx, dy]) => {
+      octx.moveTo(cx, cy + dy * s); octx.lineTo(cx, cy); octx.lineTo(cx + dx * s, cy);
+    });
+    octx.stroke();
+    octx.fillStyle = "#ff3b3b";
+    octx.font = "10px Consolas, monospace";
+    octx.fillText(`[THREAT DETECTED: PERSON — ${Math.round(confidence * 100)}%]`, px0, Math.max(10, py0 - 4));
+  }
+
+  function addLogEntry() {
+    const t = new Date().toLocaleTimeString("hu-HU");
+    const row = document.createElement("div");
+    row.style.color = "#ff3b3b";
+    row.style.animation = "blink 1s ease-in-out 2";
+    row.textContent = `[${t}] INTRUDER DETECTED`;
+    logList.prepend(row);
+    while (logList.children.length > 20) logList.removeChild(logList.lastChild);
+  }
+
+  setInterval(() => {
+    if (!active) return;
+    fetch("/security_status").then((r) => r.json()).then((d) => {
+      drawBox(d.bbox, d.confidence);
+      if (d.last_event && d.last_event.t !== lastEventT) {
+        lastEventT = d.last_event.t;
+        addLogEntry();
+      }
+    }).catch(() => {});
+  }, 1000);
+})();
+
+// ---------------------------------------------------------------------
+// Thermal Vision (demo) — MLX90640 hőkamera, ld. mock_thermal.py. A
+// 32x24-es natív rácsot egy kis offscreen canvas-ra rajzoljuk pixelenként,
+// majd felskálázzuk a látható canvas-ra image-smoothing + CSS blur-rel,
+// hogy ne "kockás", hanem folyamatos hőtérkép-hatást keltsen.
+// ---------------------------------------------------------------------
+(function setupThermalPanel() {
+  const canvas = document.getElementById("thermal-canvas");
+  const ctx = canvas.getContext("2d");
+  const rangeEl = document.getElementById("v-thermal-range");
+  const off = document.createElement("canvas");
+  const octx = off.getContext("2d");
+
+  function tempToColor(v, min, max) {
+    const t = Math.max(0, Math.min(1, (v - min) / Math.max(0.001, max - min)));
+    // kék (hideg) -> lila -> piros -> sárga (forró), egyszerű false-color skála
+    const stops = [
+      [0.00, 20, 20, 90], [0.35, 90, 20, 140], [0.6, 200, 30, 60], [0.85, 240, 120, 20], [1.0, 255, 230, 80],
+    ];
+    for (let i = 1; i < stops.length; i++) {
+      if (t <= stops[i][0]) {
+        const [t0, r0, g0, b0] = stops[i - 1];
+        const [t1, r1, g1, b1] = stops[i];
+        const f = (t - t0) / (t1 - t0 || 1);
+        return [r0 + (r1 - r0) * f, g0 + (g1 - g0) * f, b0 + (b1 - b0) * f];
+      }
+    }
+    return [255, 230, 80];
+  }
+
+  const thermalEs = new EventSource("/api/thermal_stream");
+  thermalEs.onmessage = (ev) => {
+    const d = JSON.parse(ev.data);
+    if (!d.available) {
+      // 2026-09-05: nem szimulált adatra váltunk vissza — a hardveres híd
+      // (ESP32/Arduino I2C->soros) még nincs kész, ezt jelezzük egyértelműen,
+      // dummy-adat helyett.
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = "#5f7386";
+      ctx.font = "11px Consolas, monospace";
+      ctx.textAlign = "center";
+      ctx.fillText("WAITING FOR HARDWARE BRIDGE...", canvas.width / 2, canvas.height / 2);
+      ctx.textAlign = "left";
+      rangeEl.textContent = "várakozás a hardver-hídra";
+      return;
+    }
+    off.width = d.cols; off.height = d.rows;
+    const img = octx.createImageData(d.cols, d.rows);
+    for (let i = 0; i < d.data.length; i++) {
+      const [r, g, b] = tempToColor(d.data[i], d.min, d.max);
+      img.data[i * 4] = r; img.data[i * 4 + 1] = g; img.data[i * 4 + 2] = b; img.data[i * 4 + 3] = 255;
+    }
+    octx.putImageData(img, 0, 0);
+    ctx.imageSmoothingEnabled = true;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(off, 0, 0, canvas.width, canvas.height);
+    rangeEl.textContent = `${d.min.toFixed(1)}°C — ${d.max.toFixed(1)}°C`;
+  };
+})();
+
+
+const es = new EventSource("/showcase_data");
+es.onmessage = (ev) => {
+  const d = JSON.parse(ev.data);
+
+  applyMotorQ(d.motor_q);
+  // 2026-09-05 FIX: az avatár megjelenített yaw-ja mostantól sport_yaw
+  // (SportModeState_ SAJÁT IMU-ja, ugyanaz a forrás, mint amit a
+  // térkép/LiDAR-transzformáció is használ) — korábban a különálló "yaw"
+  // mezőt (LowState_) használta, ami más referenciából jött, ezért az
+  // avatár és a térkép/pontfelhő 90 fokkal egymáshoz képest elforgatva
+  // jelent meg (user élő tesztje mutatta ki).
+  applyBodyOrientation(d.roll, d.pitch, typeof d.sport_yaw === "number" ? d.sport_yaw : d.yaw);
+  if (typeof d.position_x === "number" && typeof d.position_y === "number") {
+    window._lastRawWorldX = d.position_x;
+    window._lastRawWorldY = d.position_y;
+  }
+  if (window._liveMapCenterWorld && typeof d.position_x === "number" && typeof d.position_y === "number") {
+    robotGroup.position.x = d.position_x - window._liveMapCenterWorld.x + window._calib.robotX;
+    robotGroup.position.z = -(d.position_y - window._liveMapCenterWorld.y) + window._calib.robotY;
+  }
+  drawHorizon(d.roll || 0, d.pitch || 0);
+  if (Array.isArray(d.motor_q) && Array.isArray(d.motor_tau)) updatePower(d.motor_q, d.motor_tau);
+
+  document.getElementById("mode-label").textContent = d.mode_label || "—";
+  const speed = Math.sqrt((d.velocity_x || 0) ** 2 + (d.velocity_y || 0) ** 2);
+  setPunch(document.getElementById("hud-speed"), speed.toFixed(2) + " m/s");
+
+  document.querySelectorAll("#gait-fsm .state").forEach((el) => {
+    el.classList.toggle("active", el.dataset.state === d.mode_label);
+  });
+
+  // Gait-váltás = egy koherens "esemény-pillanat": hero-flash + toast +
+  // glitch egyszerre, hogy a néző érezze, a dashboard TÉNYLEG reagál.
+  if (d.mode_label && d.mode_label !== prevMode) {
+    flashHero(d.mode_label.toUpperCase(), "var(--event)");
+    showCommandBanner(d.mode_label);
+    prevMode = d.mode_label;
+  }
+
+  setPunch(document.getElementById("v-voltage"), (d.voltage ?? "—") + " V");
+  setPunch(document.getElementById("v-current"), (d.current ?? "—") + " A");
+  document.getElementById("v-roll").textContent = ((d.roll ?? 0) * 57.2958).toFixed(1) + "°";
+  document.getElementById("v-pitch").textContent = ((d.pitch ?? 0) * 57.2958).toFixed(1) + "°";
+  document.getElementById("v-yaw").textContent = ((d.yaw ?? 0) * 57.2958).toFixed(1) + "°";
+
+  // 2026-09-05: MINDKÉT irányban szinkronizál a szerver valós állapotával
+  // (korábban csak false-ra forszírozott) — ha több böngészőfül/session van
+  // nyitva egyszerre, vagy a kliens state elszakadt a szervertől, ez mindig
+  // visszaigazítja a UI-t a tényleges armed-értékre, megszüntetve a "villog,
+  // majd magától visszazárol" tünetet.
+  if (typeof d.armed === "boolean" && window._showcaseControlSetArmedUI) window._showcaseControlSetArmedUI(d.armed);
+  if (window._patrolUpdate) window._patrolUpdate(d.position_x, d.position_y, d.sport_yaw, d.armed);
+
+  const sdkBadge = document.getElementById("badge-sdk");
+  sdkBadge.textContent = "SDK: " + (d.sdk_ready ? "KÉSZ" : "VÁRAKOZIK");
+  sdkBadge.className = d.sdk_ready ? "ok" : "";
+
+  const srcBadge = document.getElementById("data-source-badge");
+  const isMock = d.data_source !== "live";
+  srcBadge.textContent = isMock ? "⚠ SZIMULÁLT ADAT" : "● ÉLŐ ADAT";
+  srcBadge.className = isMock ? "mock" : "live";
+  // "Bizalom-pontszám": az URDF-ből igazolt panelek aránya az összesből —
+  // a HUD-on megjelenő, ténylegesen forrásolt adatpontok (12 ízület-nyomaték
+  // + IMU + tápadat = 14) az összes megjelenített mutatóhoz képest.
+  document.getElementById("confidence-index").textContent = isMock
+    ? "14/14 mutató URDF/mérésalapú képlettel, szintetikus bemeneten"
+    : "14/14 mutató élő DDS-adatból";
+  document.getElementById("cam-source-label").textContent = isMock ? "SZIMULÁLT" : "ÉLŐ";
+
+  (d.motor_temp || []).forEach((t, i) => {
+    if (!tempRows[i]) return;
+    const pct = Math.min(100, Math.max(0, ((t - 20) / 60) * 100));
+    tempRows[i].fill.style.width = pct + "%";
+    tempRows[i].fill.style.background = tempColor(t);
+    tempRows[i].val.textContent = t + "°";
+
+    // Hőtérkép közvetlenül a robot testén — a 12 lineáris sáv helyett/mellett
+    // az adat a 3D modellre költözik, hogy "hol van most a legmelegebb
+    // ízület" azonnal látható legyen, ne kelljen 12 sort végigolvasni.
+    const legIdx = Math.floor(i / 3), part = i % 3;
+    const mat = part === 1 ? legPivots[legIdx].thighMat : part === 2 ? legPivots[legIdx].calfMat : null;
+    if (mat) {
+      const col = lerpHeatColor(t);
+      mat.emissive.copy(col);
+      mat.emissiveIntensity = 0.3 + Math.min(1, (t - 30) / 40) * 1.1;
+    }
+
+    if (t >= TEMP_ALERT_C && !alertedMotors.has(i)) {
+      alertedMotors.add(i);
+      flashHero("⚠ " + MOTOR_ORDER[i] + " " + t + "°C", "var(--danger)", 2200);
+    } else if (t < TEMP_ALERT_C - 3) {
+      alertedMotors.delete(i); // hiszterézis, ne villogjon a küszöb körül
+    }
+  });
+
+  (d.motor_tau || []).forEach((tau, i) => {
+    if (!tauRows[i]) return;
+    const pct = Math.min(100, Math.max(0, (Math.abs(tau) / 15) * 100));
+    tauRows[i].fill.style.width = pct + "%";
+    tauRows[i].fill.style.background = "#22e5ff";
+    tauRows[i].val.textContent = tau;
+  });
+};
+</script>
+</body>
+</html>
