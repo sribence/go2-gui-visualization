@@ -96,6 +96,23 @@
           <div><span>Sebesség Y</span><b id="t-vy">–</b></div>
         </div>
       </div>
+      <div class="panel" style="margin-top:16px;">
+        <h3>👤 Emberérzékelés & Személykövetés (9112)</h3>
+        <div style="display:flex; gap:12px; align-items:flex-start;">
+          <div style="flex:1;">
+            <img src="http://192.168.123.18:9112/stream.mjpg" alt="Perception stream" style="width:100%; border-radius:6px; background:#000;" onerror="this.style.display='none'; document.getElementById('p-fallback').style.display='block';">
+            <div id="p-fallback" style="display:none; padding:12px; background:#1c202a; border-radius:6px; font-size:12px; color:var(--muted);">Stream offline (http://192.168.123.18:9112/stream.mjpg)</div>
+          </div>
+          <div style="flex:1; font-size:13px;">
+            <div><span>Célpont mód: </span><b id="p-mode">Auto (legközelebbi)</b></div>
+            <div><span>Zárolt ID: </span><b id="p-target-id">–</b></div>
+            <div><span>Távolság / Irány: </span><b id="p-dist-bearing">–</b></div>
+            <div style="margin-top:10px; display:flex; gap:6px; flex-wrap:wrap;">
+              <button style="padding:6px 10px; font-size:12px; border-radius:4px; border:1px solid var(--border); background:#1c202a; color:var(--text); cursor:pointer;" onclick="setPerceptionTarget(null)">Auto Mód</button>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
     <div class="panel">
       <h3>Vezérlés</h3>
@@ -213,6 +230,35 @@ src.onmessage = (event) => {
   // ha a szerver oldal magától disarm-olt (pl. inaktivitás miatt), kövessük le itt is
   if (armed && d.armed === false) setArmedUI(false);
 };
+
+// --- perception stream integration ---
+function setPerceptionTarget(trackId) {
+  fetch('http://192.168.123.18:9112/target', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ track_id: trackId })
+  }).catch(() => {});
+}
+
+try {
+  const pSrc = new EventSource('http://192.168.123.18:9112/persons/stream');
+  pSrc.onmessage = (e) => {
+    const p = JSON.parse(e.data);
+    const modeEl = document.getElementById('p-mode');
+    if (modeEl) modeEl.textContent = p.target_mode === 'locked' ? (p.target_id == null ? '⚠️ Elveszett' : 'Zárolt') : 'Auto (legközelebbi)';
+    const tidEl = document.getElementById('p-target-id');
+    if (tidEl) tidEl.textContent = p.target_id != null ? '#' + p.target_id : '–';
+    const targetPerson = (p.persons || []).find(x => x.track_id === p.target_id) || p.persons?.[0];
+    const dbEl = document.getElementById('p-dist-bearing');
+    if (dbEl) {
+      if (targetPerson && targetPerson.distance_m != null) {
+        dbEl.textContent = targetPerson.distance_m.toFixed(2) + 'm / ' + targetPerson.bearing_deg.toFixed(1) + '°';
+      } else {
+        dbEl.textContent = '–';
+      }
+    }
+  };
+} catch (err) {}
 </script>
 </body>
 </html>

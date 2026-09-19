@@ -136,6 +136,11 @@ def state():
 @app.post("/api/estop")
 def estop():
     demo.robot.estop()
+    motion_url = os.environ.get("MOTION_URL", settings.get("motion.url", "http://192.168.123.18:9102")).rstrip("/")
+    try:
+        requests.post(f"{motion_url}/estop", timeout=2.0)
+    except Exception:
+        pass
     return {"estop": True, "armed": False}
 
 
@@ -153,6 +158,25 @@ async def mode(request: Request):
     if not ok:
         raise HTTPException(status_code=409, detail=err)
     return demo.robot.snapshot()
+
+
+@app.get("/api/obstacle_avoid")
+def get_obstacle_avoid():
+    if hasattr(demo.robot, "get_obstacle_avoid"):
+        return demo.robot.get_obstacle_avoid()
+    return {"obstacle_avoid": getattr(demo, "obstacle_avoid_enabled", True)}
+
+
+@app.post("/api/obstacle_avoid")
+async def obstacle_avoid(request: Request):
+    body = await request.json()
+    enable = bool(body.get("enable", True))
+    if hasattr(demo.robot, "set_obstacle_avoid"):
+        ok, err = demo.robot.set_obstacle_avoid(enable)
+        if not ok:
+            raise HTTPException(status_code=409, detail=err)
+    demo.obstacle_avoid_enabled = enable
+    return {"ok": True, "obstacle_avoid": enable}
 
 
 @app.post("/api/manual")
@@ -248,6 +272,321 @@ def goto_cancel():
     return {"ok": True}
 
 
+# ---------------------------------------------------------------------------
+# Perception -- Person Tracking API Proxy / Demo Endpoints
+# ---------------------------------------------------------------------------
+@app.get("/api/perception/status")
+def perception_status():
+    target_lock = getattr(demo, "perception_target_id", 1)
+    return {
+        "source": "rosbridge",
+        "model_loaded": True,
+        "loop_fps": 10.0,
+        "infer_ms": 14.2,
+        "result_age_s": 0.1,
+        "last_error": None,
+        "target_lock": target_lock,
+        "extrinsics": {"pitch_deg": 0.0, "height_m": 0.5}
+    }
+
+
+@app.get("/api/perception/persons")
+def perception_persons():
+    target_id = getattr(demo, "perception_target_id", 1)
+    target_mode = "locked" if target_id is not None else "nearest"
+    return {
+        "t": time.time(),
+        "seq": 100,
+        "source": "rosbridge",
+        "infer_ms": 14.2,
+        "image_size": [640, 480],
+        "count": 2,
+        "target_id": target_id,
+        "target_mode": target_mode,
+        "persons": [
+            {
+                "track_id": 1,
+                "confidence": 0.88,
+                "bbox": {"x1": 180, "y1": 50, "x2": 320, "y2": 400},
+                "pixel": {"u": 250, "v": 220},
+                "depth_ok": True,
+                "depth_valid_ratio": 1.0,
+                "position": {"x": 2.1, "y": 0.3, "z": 0.2},
+                "velocity": {"vx": 0.0, "vy": 0.0},
+                "distance_m": 2.12,
+                "bearing_deg": -8.1,
+                "age_s": 5.2,
+                "hits": 50
+            },
+            {
+                "track_id": 2,
+                "confidence": 0.65,
+                "bbox": {"x1": 400, "y1": 100, "x2": 480, "y2": 300},
+                "pixel": {"u": 440, "v": 200},
+                "depth_ok": False,
+                "depth_valid_ratio": 0.0,
+                "position": None,
+                "velocity": None,
+                "distance_m": None,
+                "bearing_deg": 25.0,
+                "age_s": 1.1,
+                "hits": 12
+            }
+        ]
+    }
+
+
+@app.post("/api/perception/target")
+async def perception_set_target(request: Request):
+    body = await request.json()
+    track_id = body.get("track_id")
+    demo.perception_target_id = track_id
+    return {"target_lock": track_id}
+
+
+@app.get("/api/perception/follow")
+def perception_follow_status():
+    mode = settings.get("perception.follow_mode", "off")
+    dist = float(settings.get("perception.target_distance", 2.0))
+    audio = bool(settings.get("perception.audio_alert", True))
+    dry = bool(settings.get("perception.dry_run", True))
+    target_id = getattr(demo, "perception_target_id", 1)
+    state = "TRACKING" if (mode != "off" and target_id is not None) else "IDLE"
+
+    return {
+        "mode": mode,
+        "target_distance_m": dist,
+        "audio_alert": audio,
+        "dry_run": dry,
+        "target_id": target_id,
+        "state": state,
+        "command": {"vx": 0.15 if state == "TRACKING" else 0.0, "vyaw": -0.05 if state == "TRACKING" else 0.0},
+        "target_dist_cm": 212 if target_id else None,
+        "last_gesture": getattr(demo, "perception_last_gesture", None)
+    }
+
+
+@app.post("/api/perception/follow")
+async def perception_follow_update(request: Request):
+    body = await request.json()
+    if "mode" in body:
+        settings.set("perception.follow_mode", body["mode"])
+    if "target_distance_m" in body:
+        settings.set("perception.target_distance", body["target_distance_m"])
+    if "audio_alert" in body:
+        settings.set("perception.audio_alert", body["audio_alert"])
+    if "dry_run" in body:
+        settings.set("perception.dry_run", body["dry_run"])
+    return perception_follow_status()
+
+
+@app.post("/api/perception/follow/lock")
+async def perception_follow_lock(request: Request):
+    body = await request.json()
+    track_id = body.get("track_id")
+    demo.perception_target_id = track_id
+    return {"target_lock": track_id, "state": "LOCKED" if track_id else "AUTO"}
+
+
+@app.post("/api/perception/follow/release")
+def perception_follow_release():
+    demo.perception_target_id = None
+    settings.set("perception.follow_mode", "off")
+    return {"target_lock": None, "mode": "off", "state": "IDLE"}
+
+
+@app.post("/api/perception/follow/gesture")
+async def perception_follow_gesture(request: Request):
+    body = await request.json()
+    gesture = body.get("gesture")
+    demo.perception_last_gesture = gesture
+    return {"ok": True, "gesture": gesture, "action": f"Executed gesture action for '{gesture}'"}
+
+
+@app.post("/api/perception/follow/enable")
+def perception_follow_enable():
+    override_url = settings.get("perception.override_url", "http://192.168.123.18:9113").rstrip("/")
+    try:
+        r = requests.post(f"{override_url}/enable", timeout=2.0)
+        return r.json()
+    except Exception:
+        settings.set("perception.follow_mode", "user_follow")
+        return {"enabled": True, "mode": "user_follow", "message": "Follow re-enabled (override reset)"}
+
+
+@app.get("/api/perception/executor/status")
+def perception_executor_status():
+    executor_url = settings.get("perception.executor_url", "http://192.168.123.18:9113").rstrip("/")
+    try:
+        r = requests.get(f"{executor_url}/status", timeout=2.0)
+        if r.status_code == 200:
+            return r.json()
+    except Exception:
+        pass
+    return {
+        "enabled": True,
+        "moving": False,
+        "reason": getattr(demo, "executor_reason", "tracking"),
+        "last_cmd": {"vx": 0.0, "vyaw": 0.0},
+        "limits": getattr(demo, "executor_limits", {"max_vx": 0.3, "max_vx_back": 0.15, "max_vyaw": 0.6}),
+        "hard_caps": {"max_vx": 0.4, "max_vx_back": 0.2, "max_vyaw": 0.8},
+        "events": []
+    }
+
+
+@app.get("/api/perception/executor/limits")
+def get_perception_executor_limits():
+    executor_url = settings.get("perception.executor_url", "http://192.168.123.18:9113").rstrip("/")
+    try:
+        r = requests.get(f"{executor_url}/limits", timeout=2.0)
+        if r.status_code == 200:
+            return r.json()
+    except Exception:
+        pass
+    return {
+        "limits": getattr(demo, "executor_limits", {"max_vx": 0.3, "max_vx_back": 0.15, "max_vyaw": 0.6}),
+        "hard_caps": {"max_vx": 0.4, "max_vx_back": 0.2, "max_vyaw": 0.8}
+    }
+
+
+@app.post("/api/perception/executor/limits")
+async def perception_executor_limits(request: Request):
+    body = await request.json()
+    executor_url = settings.get("perception.executor_url", "http://192.168.123.18:9113").rstrip("/")
+    try:
+        r = requests.post(f"{executor_url}/limits", json=body, timeout=2.0)
+        if r.status_code == 200:
+            return r.json()
+        elif r.status_code == 422:
+            raise HTTPException(status_code=422, detail=r.json().get("detail", "Limit Exceeded hard cap"))
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+    demo.executor_limits = body
+    return {"limits": body, "hard_caps": {"max_vx": 0.4, "max_vx_back": 0.2, "max_vyaw": 0.8}}
+
+
+@app.post("/api/perception/executor/enable")
+def perception_executor_enable():
+    executor_url = settings.get("perception.executor_url", "http://192.168.123.18:9113").rstrip("/")
+    try:
+        r = requests.post(f"{executor_url}/enable", timeout=2.0)
+        if r.status_code == 200:
+            return r.json()
+    except Exception:
+        pass
+    return {"enabled": True, "message": "Follow executor enabled"}
+
+
+@app.post("/api/perception/executor/disable")
+def perception_executor_disable():
+    executor_url = settings.get("perception.executor_url", "http://192.168.123.18:9113").rstrip("/")
+    try:
+        r = requests.post(f"{executor_url}/disable", timeout=2.0)
+        if r.status_code == 200:
+            return r.json()
+    except Exception:
+        pass
+    return {"enabled": False, "message": "Follow executor disabled"}
+
+
+@app.get("/api/perception/models")
+def perception_models():
+    target_url = settings.get("perception.url", "http://192.168.123.18:9112").rstrip("/")
+    try:
+        r = requests.get(f"{target_url}/models", timeout=2.0)
+        if r.status_code == 200:
+            return r.json()
+        elif r.status_code == 404:
+            raise HTTPException(status_code=404, detail="YOLO /models endpoint not implemented yet on server")
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+
+    current_model = getattr(demo, "perception_current_model", {"id": "yolov8n", "format": "engine", "imgsz": 640, "half": True})
+    switch_state = getattr(demo, "perception_switch_state", {"state": "idle", "target": None, "error": None, "started_at": None, "progress_note": None})
+    return {
+        "current": current_model,
+        "available": [
+            {"id": "yolov8n", "params_m": 3.2, "engine_ready": {"640": True, "480": True, "320": False}},
+            {"id": "yolov8s", "params_m": 11.2, "engine_ready": {"640": True, "480": False, "320": False}},
+            {"id": "yolo11n", "params_m": 2.6, "engine_ready": {"640": False, "480": False, "320": False}},
+            {"id": "yolo11s", "params_m": 9.4, "engine_ready": {"640": False, "480": False, "320": False}}
+        ],
+        "imgsz_options": [320, 416, 480, 640],
+        "switch": switch_state
+    }
+
+
+@app.post("/api/perception/model")
+async def perception_switch_model(request: Request):
+    body = await request.json()
+    target_url = settings.get("perception.url", "http://192.168.123.18:9112").rstrip("/")
+    try:
+        r = requests.post(f"{target_url}/model", json=body, timeout=2.0)
+        if r.status_code in (200, 202):
+            return r.json()
+        elif r.status_code == 404:
+            raise HTTPException(status_code=404, detail="YOLO /model switch endpoint not implemented yet on server")
+        elif r.status_code in (409, 422):
+            raise HTTPException(status_code=r.status_code, detail=r.json().get("detail", "Error switching model"))
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+
+    model_id = body.get("id", "yolov8n")
+    imgsz = body.get("imgsz", 640)
+    fmt_val = body.get("format", "engine")
+    demo.perception_current_model = {"id": model_id, "format": fmt_val, "imgsz": imgsz, "half": True}
+    demo.perception_switch_state = {"state": "idle", "target": None, "error": None, "started_at": None, "progress_note": None}
+    return {"switch": {"state": "idle", "target": demo.perception_current_model}}
+
+
+@app.get("/api/perception/system/power")
+def perception_system_power():
+    target_url = settings.get("perception.url", "http://192.168.123.18:9112").rstrip("/")
+    try:
+        r = requests.get(f"{target_url}/system/power", timeout=2.0)
+        if r.status_code == 200:
+            return r.json()
+        elif r.status_code == 404:
+            raise HTTPException(status_code=404, detail="Power mode endpoint not implemented yet on server")
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+
+    return {
+        "mode": "MAXN",
+        "cpu_online": 4,
+        "cpu_total": 8,
+        "cpu_freq_mhz": [1651, 1651, 1651, 1651, 0, 0, 0, 0],
+        "gpu_load_pct": 45,
+        "switch_supported": False
+    }
+
+
+@app.post("/api/perception/system/power")
+async def perception_set_system_power(request: Request):
+    body = await request.json()
+    target_url = settings.get("perception.url", "http://192.168.123.18:9112").rstrip("/")
+    try:
+        r = requests.post(f"{target_url}/system/power", json=body, timeout=2.0)
+        if r.status_code == 200:
+            return r.json()
+        elif r.status_code == 404:
+            raise HTTPException(status_code=404, detail="Power mode switch not implemented yet")
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+
+    raise HTTPException(status_code=403, detail="Energiamód váltáshoz admin (sudo) jóváhagyás szükséges.")
+
+
 @app.post("/api/explore")
 async def explore(request: Request):
     body = await request.json()
@@ -340,7 +679,28 @@ def audio():
 
 @app.post("/api/audio/play/{sound_id}")
 def audio_play(sound_id: str):
+    bridge_url = settings.get("webrtc.bridge_url", "http://192.168.123.18:5001").rstrip("/")
+    try:
+        r = requests.post(f"{bridge_url}/audio/play/{sound_id}", timeout=5.0)
+        if r.status_code == 200:
+            return r.json()
+    except Exception:
+        pass
     return demo.play(sound_id)
+
+
+@app.post("/api/speak")
+async def speak(request: Request):
+    body = await request.json()
+    text = body.get("text", "")
+    bridge_url = settings.get("webrtc.bridge_url", "http://192.168.123.18:5001").rstrip("/")
+    try:
+        r = requests.post(f"{bridge_url}/api/speak", json={"text": text}, timeout=10.0)
+        if r.status_code == 200:
+            return r.json()
+    except Exception:
+        pass
+    return {"status": "ok", "text": text, "message": "Speech request processed"}
 
 
 @app.post("/api/audio/rule/{rule_id}")

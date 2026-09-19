@@ -16,6 +16,7 @@ const trace = [];
 
 const GAITS = [
   ["damp", "Damp (ellazít)", "A motorok szabadon mozognak. Mindig biztonságos."],
+  ["lay_down", "Fekszik (lay_down)", "Lefekszik a földre."],
   ["sit", "Sit (ül)", "Leül, alacsony fogyasztás."],
   ["stand", "Stand (áll)", "Alapállás, mozgásra kész."],
   ["balance", "Balance (egyensúly)", "Aktív egyensúlyozás, egyenetlen talajra."],
@@ -62,10 +63,48 @@ export default {
         onclick: () => setMode(id),
       }));
     }
+    ui.avoidToggle = el("input", {
+      type: "checkbox", checked: true,
+      onchange: (e) => setObstacleAvoid(e.target.checked)
+    });
+    api.get("/api/obstacle_avoid").then(r => {
+      if (ui.avoidToggle && r.obstacle_avoid != null) ui.avoidToggle.checked = r.obstacle_avoid;
+    }).catch(() => {});
+
+    const GESTURES = [
+      ["greet", "👋", "Üdvözlés (Greet / Hello)"],
+      ["love", "🫶", "Szeretet / Szív (Love / Heart)"],
+      ["shake_hand", "🤝", "Kézfogás (Shake hand)"],
+      ["stretch", "🙆", "Nyújtózás (Stretch)"],
+      ["pounce", "🐅", "Rátámadás (Pounce)"],
+      ["jump", "🦘", "Ugrás (Jump)"],
+      ["front_flip", "🤸", "Front Flip (Szaltó)"],
+      ["search_light", "💡", "Keresőfény (Search light)"],
+    ];
+
+    ui.gestures = el("div.row.tight", { style: { gap: "6px", flexWrap: "wrap", marginTop: "4px" } });
+    for (const [id, ico, title] of GESTURES) {
+      ui.gestures.appendChild(el("button.btn.sm", {
+        text: ico, title: `${ico} ${title}`,
+        style: { fontSize: "16px", padding: "4px 10px" },
+        onclick: () => setMode(id)
+      }));
+    }
+
     const gaitCard = el("div.card", {}, [
-      el("h3", { text: "Testtartás és üzemmód" }),
+      el("h3", { text: "Testtartás, Trükkök és üzemmód" }),
       el("div.body", {}, [
         ui.gait,
+        el("div", { style: { marginTop: "10px", fontSize: "11px", color: "var(--dim)" } }, [
+          el("div", { text: "Kézjelek, Trükkök és Keresőfény (Emoji gombok):", style: { marginBottom: "4px" } }),
+          ui.gestures
+        ]),
+        el("div.row", { style: { marginTop: "12px", paddingTop: "8px", borderTop: "1px solid var(--border)", alignItems: "center", gap: "8px" } }, [
+          el("label.switch-wrap", { style: { display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", fontSize: "12px", fontWeight: "bold" } }, [
+            ui.avoidToggle,
+            el("span", { text: "🛡️ Akadálykerülés (Obstacle Avoidance)" })
+          ])
+        ]),
         el("div.help", { style: { marginTop: "8px", fontSize: "11px", color: "var(--dim)" },
           text: "A Damp mindig kiadható. A többihez élesített robot kell." }),
       ]),
@@ -245,8 +284,20 @@ function key(k, label) {
 }
 
 function setMode(m) {
+  if (m === "damp") {
+    const confirmDamp = window.confirm(
+      "⚠️ DAMP / ELLAZÍTÁS FIGYELMEZTETÉS:\n\nA Damp parancs azonnal lekapcsolja a motorok tartónyomatékát, és a robot összecsuklik a földre!\n\nBiztosan kiadod a Damp parancsot?"
+    );
+    if (!confirmDamp) return;
+  }
   api.post("/api/mode", { mode: m })
     .then(() => toast(`Üzemmód: ${m}`))
+    .catch((e) => toast(e.message, "warn"));
+}
+
+function setObstacleAvoid(enabled) {
+  api.post("/api/obstacle_avoid", { enable: enabled })
+    .then(() => toast(`Akadálykerülés: ${enabled ? "BEKAPCSOLVA" : "KIKAPCSOLVA"}`))
     .catch((e) => toast(e.message, "warn"));
 }
 

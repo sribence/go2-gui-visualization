@@ -146,7 +146,7 @@ def events(limit: int = 120, level: str | None = None) -> list:
 PATROL = [(-3.4, -3.4), (-3.4, 3.6), (-1.0, 3.6), (-1.0, 0.1),
           (2.2, 0.1), (3.9, -3.4), (-1.0, -3.8), (-1.0, 0.1)]
 
-MODES = ["damp", "sit", "stand", "balance", "moving"]
+MODES = ["damp", "sit", "stand", "stand_up", "lay_down", "laydown", "balance", "moving", "wave", "heart"]
 
 
 class DemoRobot:
@@ -224,6 +224,16 @@ class DemoRobot:
                 return False, "robot nincs élesítve"
             self.mode = mode
         log("info", "core", f"mód: {mode}")
+        return True, None
+
+    def get_obstacle_avoid(self):
+        with self.lock:
+            return {"obstacle_avoid": getattr(self, "obstacle_avoid_enabled", True)}
+
+    def set_obstacle_avoid(self, enable: bool):
+        with self.lock:
+            self.obstacle_avoid_enabled = enable
+        log("info", "core", f"akadálykerülés: {enable}")
         return True, None
 
     def goto(self, x, y):

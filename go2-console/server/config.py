@@ -136,6 +136,32 @@ PARAMS: list[Param] = [
           help="A határ elérésekor a térkép nem nő tovább. Így egy hosszú "
                "munkamenet nem eszi meg a gép memóriáját észrevétlenül."),
 
+    # -- Perception (Person Tracking) -------------------------------------
+    Param("perception.url", "Perception backend URL", "text", "http://192.168.123.18:9112",
+          "perception", "Kapcsolat",
+          help="A Jetson-on futó go2-brain-logic perception mikroszerviz Base URL-je (pl. http://192.168.123.18:9112)."),
+    Param("perception.enabled", "Emberérzékelés engedélyezve", "toggle", True,
+          "perception", "Kapcsolat"),
+    Param("perception.follow_mode", "Követési mód", "select", "off",
+          "perception", "Követés", options=["off", "user_follow", "intruder", "trick"],
+          help="off: Kikapcsolva, user_follow: Felhasználó követés, intruder: Behatoló-riasztás, trick: Trükk & Gesture mód."),
+    Param("perception.target_distance", "Követési távolság", "slider", 2.0,
+          "perception", "Követés", "m", 1.0, 4.0, 0.1,
+          help="A robot ennyi távolságot igyekszik tartani a követett személytől."),
+    Param("perception.audio_alert", "Hangjelzések követéskor", "toggle", True,
+          "perception", "Követés",
+          help="Hangjelzést ad ki Intrúder módban vagy észleléskor."),
+    Param("perception.dry_run", "Szimulált mozgás (Dry Run)", "toggle", True,
+          "perception", "Biztonság",
+          help="Beapcsolva a mozgási parancsok kiszámítása csak a HUD/JSON felületen jelenik meg, a robot nem mozog."),
+    # -- Motion & Override ------------------------------------------------
+    Param("motion.url", "Motion szerviz URL (E-Stop)", "text", "http://192.168.123.18:9102",
+          "manual", "Biztonság",
+          help="A vészleállítási parancsot (E-Stop) kezelő Motion szerviz URL-je."),
+    Param("perception.override_url", "Távirányító-felülírás szerviz URL", "text", "http://192.168.123.18:9113",
+          "perception", "Kapcsolat",
+          help="A botkormányos felülírás utáni újraengedélyező szerviz URL-je (POST /enable)."),
+
     # -- Cameras ----------------------------------------------------------
     Param("cam.stream_fps", "Stream képkockasebesség", "slider", 10, "cameras", "Élő kép",
           "fps", 1, 30, 1),

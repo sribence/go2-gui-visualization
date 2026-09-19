@@ -38,6 +38,7 @@ export default {
     nodes.health = el("div");
     nodes.cams = el("div.grid.g2", { style: { gap: "6px" } });
     nodes.alerts = el("div.stack");
+    nodes.perception = el("div");
     nodes.mini = el("canvas", { width: 420, height: 300, style: { width: "100%", borderRadius: "6px", background: "#0a0d12", cursor: "crosshair" } });
 
     grid.appendChild(card("Pozíció és mozgás", nodes.pose));
@@ -49,6 +50,7 @@ export default {
     const row2 = el("div.grid.g2", { style: { marginTop: "12px" } });
     row2.appendChild(card("Minitérkép — kattints a célért", nodes.mini));
     const right = el("div.stack");
+    right.appendChild(card("Személykövetés (Perception)", nodes.perception));
     right.appendChild(card("Aktív riasztások", nodes.alerts));
     right.appendChild(card("Kameraképek", nodes.cams));
     row2.appendChild(right);
@@ -118,6 +120,18 @@ export default {
       kv("élesítve", s.armed ? "IGEN" : "nem"),
       kv("legközelebbi tárgy", `${fmt.n(s.proximity?.min_distance_m)} m`),
       bars(tempHistory, warn, warn + 10),
+    );
+
+    const pTarget = s.perception?.target_id;
+    nodes.perception.innerHTML = "";
+    nodes.perception.append(
+      kv("célpont zárolva", pTarget != null ? `#${pTarget}` : "Auto (legközelebbi)"),
+      kv("érzékelt személyek", `${s.perception?.count ?? 0} fő`),
+      el("button.btn.sm", {
+        text: "👤 Érzékelés modul megnyitása",
+        style: { marginTop: "6px" },
+        onclick: () => { location.hash = "perception"; }
+      })
     );
 
     // Alerts
