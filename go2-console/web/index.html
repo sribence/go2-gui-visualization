@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="hu" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Go2 Console</title>
+<link rel="stylesheet" href="/static/css/console.css__ASSET_V__" />
+</head>
+<body>
+
+<div id="app">
+
+  <header id="header">
+    <span class="brand">GO2 CONSOLE<small id="brand-mode">demó</small></span>
+
+    <span class="stat" id="st-link"><span class="dot" id="link-dot"></span><span id="link-text">csatlakozás…</span><span class="k" id="link-ms"></span></span>
+    <span class="stat" id="st-batt"><span class="k">akku</span><span class="meter"><i id="batt-bar"></i></span><span id="batt-pct">--</span></span>
+    <span class="stat" id="st-temp"><span class="k">motor</span><span id="temp-max">--</span></span>
+    <span class="stat" id="st-mode"><span class="k">mód</span><span id="mode-txt">--</span></span>
+    <span class="stat" id="st-nav"><span class="k">nav</span><span id="nav-txt">--</span></span>
+
+    <span class="spacer"></span>
+
+    <button class="hbtn" id="btn-arm">ÉLESÍTÉS</button>
+    <button class="hbtn" id="btn-theme" title="Téma váltása">◐</button>
+    <button class="hbtn" id="btn-insp" title="Inspektor ki/be">▤</button>
+    <button id="estop">■ E-STOP</button>
+  </header>
+
+  <nav id="rail"></nav>
+
+  <main id="workspace"></main>
+
+  <aside id="inspector">
+    <div class="insp-head">
+      <h2 id="insp-title">Inspektor</h2>
+      <select id="profile-sel" style="width:auto;font-size:11px;padding:3px 6px">
+        <option value="">profil…</option>
+      </select>
+    </div>
+    <div id="insp-body"></div>
+  </aside>
+
+  <footer id="footer">
+    <div class="foot-head">
+      <h3>Eseménynapló</h3>
+      <select id="ev-filter" style="width:auto;font-size:11px;padding:2px 6px">
+        <option value="all">mind</option>
+        <option value="warn">figyelmeztetés+</option>
+        <option value="error">csak hiba</option>
+      </select>
+      <span class="spacer"></span>
+      <button class="btn sm" id="btn-foot">összecsuk</button>
+    </div>
+    <div id="eventlog"></div>
+  </footer>
+
+</div>
+
+<div id="modal"><div class="dialog" id="dialog"></div></div>
+<div id="toasts"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script type="module">
+  // The version is injected by the server from the newest asset mtime, so
+  // an edited ES module is never served from the browser's module cache.
+  window.__V = "__ASSET_V__";
+  import("/static/js/app.js" + window.__V);
+</script>
+</body>
+</html>

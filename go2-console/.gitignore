@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+settings.json
+
+console.out.log
+console.err.log
