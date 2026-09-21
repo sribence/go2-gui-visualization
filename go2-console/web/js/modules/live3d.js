@@ -15,6 +15,8 @@ let opts = {
   points: 4000,
   hz: 5,
   persistSec: 3.5,
+  lidarYawDeg: 88,
+  lidarMirror: true,
 };
 let clouds = { go2: null, hesai: null };
 let slam = { version: -1, total: 0, shown: 0, status: null, busy: false };
@@ -1164,11 +1166,25 @@ function makeScene(host) {
       const pos = new Float32Array(n * 3);
       const col = new Float32Array(n * 3);
       const c = new THREE.Color();
+      const isGo2 = (name === "go2");
+      const yawRad = (((window._calib ? window._calib.lidarYawDeg : opts.lidarYawDeg) || 0) * Math.PI) / 180;
+      const cosY = Math.cos(yawRad), sinY = Math.sin(yawRad);
+      const mirrorSign = ((window._calib ? window._calib.lidarMirror : opts.lidarMirror) !== false) ? -1 : 1;
+
       for (let i = 0; i < n; i++) {
         const pt = points[i];
-        const x = Array.isArray(pt) ? (pt[0] || 0) : (pt?.x || 0);
-        const y = Array.isArray(pt) ? (pt[1] || 0) : (pt?.y || 0);
+        let x = Array.isArray(pt) ? (pt[0] || 0) : (pt?.x || 0);
+        let y = Array.isArray(pt) ? (pt[1] || 0) : (pt?.y || 0);
         const z = Array.isArray(pt) ? (pt[2] || 0) : (pt?.z || 0);
+
+        if (isGo2) {
+          y = y * mirrorSign;
+          const rx = cosY * x - sinY * y;
+          const ry = sinY * x + cosY * y;
+          x = rx;
+          y = ry;
+        }
+
         pos[i * 3] = x; pos[i * 3 + 1] = z; pos[i * 3 + 2] = -y;
         const t = Math.max(0, Math.min(1, (z + 0.5) / 2.4));
         c.setHSL(l.hueBase - t * 0.12, 0.85, 0.35 + t * 0.35);
