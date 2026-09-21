@@ -634,18 +634,18 @@ export default {
   },
 
   async playPresetSound(soundId) {
-    const bridgeUrl = store.get("webrtc.bridge_url", "http://192.168.123.18:5001").replace(/\/$/, "");
     try {
-      const res = await fetch(`${bridgeUrl}/audio/play/${soundId}`, { method: "POST" });
-      if (res.ok) {
-        toast(`🔊 Robot hang lejátszva: ${soundId}`);
-        return;
-      }
+      await api.post(`/api/audio/play/${soundId}`);
+      toast(`🔊 Robot hang lejátszva: ${soundId}`);
+      return;
     } catch (e) {
+      const bridgeUrl = store.get("webrtc.bridge_url", "http://192.168.123.18:5001").replace(/\/$/, "");
       try {
-        await api.post(`/api/audio/play/${soundId}`);
-        toast(`🔊 Robot hang lejátszva: ${soundId}`);
-        return;
+        const res = await fetch(`${bridgeUrl}/audio/play/${soundId}`, { method: "POST" });
+        if (res.ok) {
+          toast(`🔊 Robot hang lejátszva: ${soundId}`);
+          return;
+        }
       } catch (err) {
         toast("Hiba a hanglejátszáskor: " + err.message, "warn");
       }
@@ -653,22 +653,22 @@ export default {
   },
 
   async speakTTS(text) {
-    const bridgeUrl = store.get("webrtc.bridge_url", "http://192.168.123.18:5001").replace(/\/$/, "");
     try {
-      const res = await fetch(`${bridgeUrl}/api/speak`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text })
-      });
-      if (res.ok) {
-        toast(`🗣️ TTS felolvasás elküldve: "${text}"`);
-        return;
-      }
+      await api.post("/api/speak", { text });
+      toast(`🗣️ TTS felolvasás elküldve: "${text}"`);
+      return;
     } catch (e) {
+      const bridgeUrl = store.get("webrtc.bridge_url", "http://192.168.123.18:5001").replace(/\/$/, "");
       try {
-        await api.post("/api/speak", { text });
-        toast(`🗣️ TTS felolvasás elküldve: "${text}"`);
-        return;
+        const res = await fetch(`${bridgeUrl}/api/speak`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text })
+        });
+        if (res.ok) {
+          toast(`🗣️ TTS felolvasás elküldve: "${text}"`);
+          return;
+        }
       } catch (err) {
         toast("TTS Hiba: " + err.message, "warn");
       }
@@ -684,9 +684,8 @@ export default {
     const formData = new FormData();
     formData.append("file", file);
 
-    const bridgeUrl = store.get("webrtc.bridge_url", "http://192.168.123.18:5001").replace(/\/$/, "");
     try {
-      const res = await fetch(`${bridgeUrl}/audio/megaphone`, {
+      const res = await fetch("/api/audio/megaphone", {
         method: "POST",
         body: formData
       });
@@ -695,7 +694,19 @@ export default {
         return;
       }
     } catch (e) {
-      toast("Megafon feltöltési hiba: " + e.message, "warn");
+      const bridgeUrl = store.get("webrtc.bridge_url", "http://192.168.123.18:5001").replace(/\/$/, "");
+      try {
+        const res = await fetch(`${bridgeUrl}/audio/megaphone`, {
+          method: "POST",
+          body: formData
+        });
+        if (res.ok) {
+          toast("🎙️ Hangfájl sikeresen bejátszva a robot hangszóróján!");
+          return;
+        }
+      } catch (err) {
+        toast("Megafon feltöltési hiba: " + err.message, "warn");
+      }
     }
   },
 

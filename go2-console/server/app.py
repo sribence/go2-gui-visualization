@@ -703,6 +703,23 @@ async def speak(request: Request):
     return {"status": "ok", "text": text, "message": "Speech request processed"}
 
 
+@app.post("/api/audio/megaphone")
+async def audio_megaphone(request: Request):
+    bridge_url = settings.get("webrtc.bridge_url", "http://192.168.123.18:5001").rstrip("/")
+    try:
+        content_type = request.headers.get("content-type", "")
+        body = await request.body()
+        headers = {}
+        if content_type:
+            headers["Content-Type"] = content_type
+        r = requests.post(f"{bridge_url}/audio/megaphone", data=body, headers=headers, timeout=30.0)
+        if r.status_code == 200:
+            return r.json()
+        return JSONResponse(status_code=r.status_code, content={"error": r.text})
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @app.post("/api/audio/rule/{rule_id}")
 async def audio_rule(rule_id: str, request: Request):
     body = await request.json()
