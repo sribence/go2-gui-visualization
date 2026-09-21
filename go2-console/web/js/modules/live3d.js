@@ -1117,7 +1117,10 @@ function makeScene(host) {
         const n = points.length;
         const framePos = new Float32Array(n * 3);
         for (let i = 0; i < n; i++) {
-          const [x, y, z] = points[i];
+          const pt = points[i];
+          const x = Array.isArray(pt) ? (pt[0] || 0) : (pt?.x || 0);
+          const y = Array.isArray(pt) ? (pt[1] || 0) : (pt?.y || 0);
+          const z = Array.isArray(pt) ? (pt[2] || 0) : (pt?.z || 0);
           framePos[i * 3 + 0] = x;
           framePos[i * 3 + 1] = z;
           framePos[i * 3 + 2] = -y;
@@ -1162,7 +1165,10 @@ function makeScene(host) {
       const col = new Float32Array(n * 3);
       const c = new THREE.Color();
       for (let i = 0; i < n; i++) {
-        const [x, y, z] = points[i];
+        const pt = points[i];
+        const x = Array.isArray(pt) ? (pt[0] || 0) : (pt?.x || 0);
+        const y = Array.isArray(pt) ? (pt[1] || 0) : (pt?.y || 0);
+        const z = Array.isArray(pt) ? (pt[2] || 0) : (pt?.z || 0);
         pos[i * 3] = x; pos[i * 3 + 1] = z; pos[i * 3 + 2] = -y;
         const t = Math.max(0, Math.min(1, (z + 0.5) / 2.4));
         c.setHSL(l.hueBase - t * 0.12, 0.85, 0.35 + t * 0.35);
@@ -1182,7 +1188,10 @@ function makeScene(host) {
       const col = new Float32Array(n * 3);
       const c = new THREE.Color();
       for (let i = 0; i < n; i++) {
-        const [x, y, z] = points[i];
+        const pt = points[i];
+        const x = Array.isArray(pt) ? (pt[0] || 0) : (pt?.x || 0);
+        const y = Array.isArray(pt) ? (pt[1] || 0) : (pt?.y || 0);
+        const z = Array.isArray(pt) ? (pt[2] || 0) : (pt?.z || 0);
         pos[i * 3] = x; pos[i * 3 + 1] = z; pos[i * 3 + 2] = -y;
         const t = Math.max(0, Math.min(1, (z + 0.5) / 2.4));
         c.setHSL(0.42 - t * 0.14, 0.7, 0.28 + t * 0.42);

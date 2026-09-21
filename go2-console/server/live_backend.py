@@ -486,17 +486,21 @@ class LiveRobot:
             if isinstance(ls, dict):
                 imu_val = ls.get("imu_state")
 
-        # Motor temps & body temp
+        # Motor temps, motor_q & body temp
         m_temps = c_data.get("motor_temps", []) if healthy else []
+        motor_q = c_data.get("motor_q", []) if healthy else []
         max_m_temp = c_data.get("max_motor_temp") if healthy else None
         body_temp = c_data.get("body_temp_c") if healthy else None
-        if healthy and not m_temps and c_data.get("lowstate"):
+        if healthy and c_data.get("lowstate"):
             ls = c_data["lowstate"]
             if isinstance(ls, dict):
                 m_states = ls.get("motor_state") or []
-                m_temps = [m.get("temperature", 0) for m in m_states if isinstance(m, dict)]
-                if m_temps:
-                    max_m_temp = max(m_temps)
+                if not m_temps:
+                    m_temps = [m.get("temperature", 0) for m in m_states if isinstance(m, dict)]
+                    if m_temps:
+                        max_m_temp = max(m_temps)
+                if not motor_q:
+                    motor_q = [m.get("q", 0.0) for m in m_states if isinstance(m, dict)]
 
         # Pose & Velocity
         pose = c_data.get("pose") if healthy else None
@@ -537,6 +541,7 @@ class LiveRobot:
             "velocity": vel,
             "battery": bat,
             "max_motor_temp": max_m_temp,
+            "motor_q": motor_q,
             "imu": imu_val,
             "armed": motion.get("armed") if MOTION else False,
             "motion": {"enabled": bool(MOTION), **motion},
@@ -562,6 +567,7 @@ class LiveRobot:
             "sources": c_data.get("sources") if healthy else None,
             "readonly": not MOTION,
             "pose_unavailable_reason": c_data.get("pose_unavailable_reason") if healthy else None,
+            "map_version": map_version(),
             "link": link,
             "pillars": pillars,
             "pillars_expected": (["core"] if (c_data or {}).get("readonly")
@@ -610,7 +616,7 @@ def map_payload() -> dict:
     # pillar. Asking the dead pillar first cost a full 2s timeout on every
     # single map request, which made the map panel feel broken.
     with robot.lock:
-        mapping_up = robot._pillars.get("mapping", True)
+        mapping_up = robot._pillars.get("mapping", False)
     if not mapping_up and slam.status().get("map_voxels"):
         return _slam_map()
 
