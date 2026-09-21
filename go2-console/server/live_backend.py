@@ -1174,5 +1174,4 @@ def start_background():
     threading.Thread(target=_load_sounds_async, daemon=True, name="live-sounds").start()
     log("info", "console", f"éles backend indult, core: {CORE}")
 if not TOKEN:
-    log("warn", "console",
-        "MC_API_TOKEN nincs beállítva — a core minden írási művelete 503-at fog adni")
+    log("info", "console", "MC_API_TOKEN nincs megadva (alapértelmezett hídmód/web_dashboard használata)")
