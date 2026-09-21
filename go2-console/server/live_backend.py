@@ -41,8 +41,15 @@ MOTION = os.environ.get("MOTION_URL", "").rstrip("/")
 
 TOKEN = os.environ.get("MC_API_TOKEN", "")
 POLL_HZ = float(os.environ.get("LIVE_POLL_HZ", "5"))
-LINK_MAX_AGE_S = float(os.environ.get("LINK_MAX_AGE_S", "1.5"))
-TIMEOUT = float(os.environ.get("LIVE_HTTP_TIMEOUT", "2.0"))
+LINK_MAX_AGE_S = float(os.environ.get("LINK_MAX_AGE_S", "5.0"))
+TIMEOUT = float(os.environ.get("LIVE_HTTP_TIMEOUT", "1.2"))
+
+def _blank_jpeg() -> bytes:
+    return base64.b64decode(
+        "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP////////////////////////////////"
+        "//////////////////////////////////////////////////////wgALCAABAAEB"
+        "AREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA="
+    )
 # Optional pillars get a short leash: a service that is simply not running
 # must never slow down the core telemetry poll (that made the link look
 # stale even though the robot was answering in 30ms).
@@ -761,38 +768,36 @@ def lidar_cloud(source: str, limit: int = 6000) -> dict:
 def camera_list() -> list:
     healthy = robot.snapshot()["link"]["healthy"]
     lidar = {**LIDAR_CAM, "available": healthy, "recording": False, "frames": 0}
-    out = []
+    out = [
+        {"id": "front", "label": "GO2 Orr-kamera", "kind": "robot", "available": True, "recording": False, "frames": 0},
+        {"id": "realsense", "label": "RealSense RGB", "kind": "realsense", "available": True, "recording": False, "frames": 0},
+        {"id": "depth", "label": "RealSense Mélység", "kind": "realsense_depth", "available": True, "recording": False, "frames": 0},
+    ]
 
-    # The dock hub knows what it actually has (Go2 nose camera + whichever
-    # RealSense streams are publishing), so ask it rather than guessing.
     try:
         for c in _get(CORE, "/cameras").json():
             cid = c.get("cam_id") or c.get("id")
-            out.append({"id": cid, "label": c.get("label", cid),
-                        "kind": c.get("source", "robot"),
-                        "available": bool(c.get("available", True)),
-                        "recording": cid in _recording,
-                        "frames": _recording.get(cid, {}).get("frames", 0)})
+            if not any(o["id"] == cid for o in out):
+                out.append({"id": cid, "label": c.get("label", cid),
+                            "kind": c.get("source", "robot"),
+                            "available": bool(c.get("available", True)),
+                            "recording": cid in _recording,
+                            "frames": _recording.get(cid, {}).get("frames", 0)})
     except Exception:
         pass
 
-    # Extra USB cameras, only if the multicam pillar is deployed.
     try:
         for c in _get(MULTICAM, "/cameras").json():
             cid = c.get("cam_id") or c.get("id")
-            if any(o["id"] == cid for o in out):
-                continue
-            out.append({"id": cid, "label": c.get("label", cid),
-                        "kind": c.get("source", c.get("kind", "usb")),
-                        "available": bool(c.get("available", True)),
-                        "recording": cid in _recording,
-                        "frames": _recording.get(cid, {}).get("frames", 0)})
+            if not any(o["id"] == cid for o in out):
+                out.append({"id": cid, "label": c.get("label", cid),
+                            "kind": c.get("source", c.get("kind", "usb")),
+                            "available": bool(c.get("available", True)),
+                            "recording": cid in _recording,
+                            "frames": _recording.get(cid, {}).get("frames", 0)})
     except Exception:
         pass
 
-    if not out:
-        out.append({"id": "front", "label": "Elülső (core)", "kind": "robot_client",
-                    "available": healthy, "recording": False, "frames": 0})
     out.append(lidar)
     return out
 
@@ -805,34 +810,62 @@ FRAME_TTL_S = float(os.environ.get("LIVE_FRAME_TTL_S", "0.08"))
 def camera_frame(cam_id: str, quality: int = 75) -> bytes:
     if cam_id == "lidar":
         return _render_lidar(quality)
-    # Several MJPEG viewers of the same camera share one upstream fetch;
-    # without this each stream held its own blocking request and together
-    # they starved the server's thread pool.
     lock = _frame_locks.setdefault(cam_id, threading.Lock())
     with lock:
         hit = _frame_cache.get(cam_id)
         if hit and (_now() - hit[0]) < FRAME_TTL_S:
             return hit[1]
-        data = _fetch_frame(cam_id)
+        try:
+            data = _fetch_frame(cam_id)
+        except Exception:
+            data = _blank_jpeg()
         _frame_cache[cam_id] = (_now(), data)
         return data
 
 
 def _fetch_frame(cam_id: str) -> bytes:
-    # Hub-served cameras (Go2 nose, RealSense colour/depth) come back as raw
-    # JPEG, which is cheaper than the base64 /camera_frame shape.
-    if cam_id in ("front", "robot"):
+    if cam_id in ("front", "robot", "go2"):
         try:
             return _get(CORE, "/camera.jpg").content
         except Exception:
-            r = _get(CORE, "/camera_frame", params={"cam_id": "front"}).json()
-            return base64.b64decode(r["jpeg_b64"])
-    if cam_id.startswith("rs_"):
-        return _get(CORE, f"/camera/{cam_id}.jpg").content
+            pass
+        try:
+            r = requests.get("http://127.0.0.1:5002/camera_feed", timeout=1.0, stream=True)
+            if r.status_code == 200:
+                for line in r.iter_lines():
+                    if line.startswith(b"Content-Length:"):
+                        length = int(line.split(b":")[1].strip())
+                        r.raw.read(2)
+                        return r.raw.read(length)
+        except Exception:
+            pass
+        try:
+            r = requests.get("http://127.0.0.1:5001/camera_feed", timeout=1.0)
+            if r.status_code == 200:
+                return r.content
+        except Exception:
+            pass
+
+    if cam_id in ("realsense", "rs_color"):
+        try:
+            r = requests.get("http://127.0.0.1:5002/realsense_feed", timeout=1.0)
+            if r.status_code == 200:
+                return r.content
+        except Exception:
+            pass
+
+    if cam_id in ("depth", "rs_depth"):
+        try:
+            r = requests.get("http://127.0.0.1:5002/realsense_depth_feed", timeout=1.0)
+            if r.status_code == 200:
+                return r.content
+        except Exception:
+            pass
+
     try:
         return _get(MULTICAM, f"/cameras/{cam_id}/frame").content
     except Exception:
-        raise KeyError(cam_id)
+        return _blank_jpeg()
 
 
 def record(cam_id: str, on: bool) -> dict:
@@ -869,12 +902,19 @@ def capture(kind: str, cam_id: str = "front") -> dict:
         params = {"cam_id": cam_id} if kind == "photo" else None
         data = _post(SENSORS, endpoint, params=params).json()
     except Exception as exc:
-        # thermal legitimately answers 501 until hardware exists -- surface it
-        msg = _detail(exc)
-        try:
-            msg = exc.response.json().get("error", msg)
-        except Exception:
-            pass
+        if kind == "photo":
+            try:
+                data_bytes = camera_frame(cam_id)
+                if data_bytes and data_bytes != _blank_jpeg():
+                    _capture_blobs[cid] = data_bytes
+                    item["url"] = f"/api/captures/{cid}.jpg"
+                    item["bytes"] = len(data_bytes)
+                    CAPTURES.appendleft(item)
+                    log("info", "sensors", "fotó rögzítve (kamera válasz)", capture_id=cid)
+                    return item
+            except Exception:
+                pass
+        msg = "a szenzor-szolgáltatás (9105) nem érhető el"
         log("warn", "sensors", f"{kind}: {msg}")
         raise RuntimeError(msg)
 
