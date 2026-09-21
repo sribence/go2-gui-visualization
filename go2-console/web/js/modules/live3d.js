@@ -17,12 +17,29 @@ let opts = {
   persistSec: 3.5,
   lidarYawDeg: 88,
   lidarMirror: true,
+  calib: Object.assign({
+    robotZOffset: -0.10,
+    robotYawDeg: 0,
+    lidarYawDeg: 88,
+    lidarMirror: true,
+    lidarZOffset: 0.0,
+    hesaiYawDeg: 180,
+    hesaiMirror: false,
+    hesaiZOffset: 0.0,
+    hesaiPersistSec: 3.5,
+    mapFloorYawDeg: 0,
+    mapFloorMirror: false,
+    mapFloorXOffset: 0.0,
+    mapFloorYOffset: 0.0,
+    mapFloorZOffset: 0.0,
+  }, store.get("l3d_calib") || {}),
 };
 let clouds = { go2: null, hesai: null };
 let slam = { version: -1, total: 0, shown: 0, status: null, busy: false };
 let camSource = "go2";
 let unlocked = false;
 let lastGridVersion = -1;
+let calibOpen = false;
 
 /* Manual drive state. */
 let drive = { vx: 0, vy: 0, vyaw: 0 };
@@ -65,6 +82,7 @@ export default {
       el("button.btn.sm", { id: "l3d-slam", text: "◐ SLAM", onclick: toggleSlam }),
       el("button.btn.sm", { id: "l3d-count", text: "⚙ Hesai pontszám", onclick: cyclePoints }),
       tog("freeze", () => `❄ Freeze: ${opts.freeze ? "BE" : "KI"}`, () => opts.freeze, "#ffb84d"),
+      el("button.btn.sm", { id: "l3d-calib-btn", text: "🛠 Kalibráció", onclick: toggleCalibPanel }),
       el("button.btn.sm", { text: "⟲ Reset", onclick: () => { three?.resetView(); toast("Nézet alaphelyzetbe"); } }),
     );
 
@@ -125,7 +143,8 @@ export default {
       },
     });
 
-    ui.wrap.append(ui.canvas, ui.bar, ui.pip, ui.manual, ui.stats);
+    ui.calibPanel = buildCalibPanel();
+    ui.wrap.append(ui.canvas, ui.bar, ui.pip, ui.manual, ui.stats, ui.calibPanel);
     body.appendChild(ui.wrap);
 
     clear(tools);
@@ -594,7 +613,11 @@ function slider(label, value, min, max, step, unit, onChange) {
   const num = el("input.num", { type: "number", value: txt(value), min, max, step });
   const rng = el("input", {
     type: "range", min, max, step, value,
-    oninput: (e) => { num.value = txt(e.target.value); },
+    oninput: (e) => {
+      const v = parseFloat(e.target.value);
+      num.value = txt(v);
+      onChange(v);
+    },
     onchange: (e) => onChange(parseFloat(e.target.value)),
   });
   num.onchange = (e) => {
@@ -610,6 +633,124 @@ function slider(label, value, min, max, step, unit, onChange) {
       rng, num, el("span.unit", { text: unit || "" }),
     ]),
   ]);
+}
+
+function toggleCalibPanel() {
+  calibOpen = !calibOpen;
+  if (ui.calibPanel) ui.calibPanel.style.display = calibOpen ? "block" : "none";
+  const btn = document.getElementById("l3d-calib-btn");
+  if (btn) btn.classList.toggle("on", calibOpen);
+}
+
+function buildCalibPanel() {
+  const container = el("div", {
+    id: "l3d-calib-panel",
+    style: {
+      position: "absolute", top: "45px", left: "10px", zIndex: "100",
+      width: "330px", maxHeight: "calc(100% - 60px)", overflowY: "auto",
+      background: "rgba(10,13,18,0.95)", border: "1px solid var(--line-2)",
+      borderRadius: "10px", padding: "12px", boxShadow: "0 8px 32px rgba(0,0,0,0.6)",
+      display: "none", color: "#e2e8f0", backdropFilter: "blur(8px)",
+    },
+  });
+
+  function renderContent() {
+    clear(container);
+    const header = el("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px", borderBottom: "1px solid var(--line)", paddingBottom: "6px" } }, [
+      el("span", { text: "🛠 ÉLŐ NÉZET KALIBRÁCIÓ", style: { fontWeight: "bold", fontSize: "11.5px", color: "var(--accent)", letterSpacing: ".05em" } }),
+      el("button.btn.sm", { text: "✖", onclick: toggleCalibPanel }),
+    ]);
+
+    const sec = (title) => el("div", { style: { fontSize: "10.5px", fontWeight: "bold", color: "#b07dff", marginTop: "10px", marginBottom: "4px", textTransform: "uppercase", letterSpacing: ".05em" } }, [title]);
+
+    const cal = opts.calib;
+    const onChange = () => {
+      store.set("l3d_calib", opts.calib);
+      if (window._calib) {
+        window._calib.lidarYawDeg = opts.calib.lidarYawDeg;
+        window._calib.lidarMirror = opts.calib.lidarMirror;
+        window._calib.hesaiYawDeg = opts.calib.hesaiYawDeg;
+        window._calib.hesaiMirror = opts.calib.hesaiMirror;
+        window._calib.hesaiPersistSec = opts.calib.hesaiPersistSec;
+      }
+      three?.refreshCalib();
+    };
+
+    const mkSlider = (label, key, min, max, step, unit) => {
+      return slider(label, cal[key] ?? 0, min, max, step, unit, (v) => {
+        cal[key] = v;
+        onChange();
+      });
+    };
+
+    const mkCheck = (label, key) => {
+      const cb = el("input", { type: "checkbox", checked: !!cal[key] });
+      cb.onchange = (e) => { cal[key] = e.target.checked; onChange(); };
+      return el("label", { style: { display: "flex", alignItems: "center", gap: "6px", fontSize: "11px", margin: "4px 0", cursor: "pointer", color: "var(--dim)" } }, [
+        cb, el("span", { text: label }),
+      ]);
+    };
+
+    const btnRow = el("div", { style: { display: "flex", gap: "6px", marginTop: "14px", paddingTop: "8px", borderTop: "1px solid var(--line)" } }, [
+      el("button.btn.sm", { text: "💾 Mentés", onclick: () => { store.set("l3d_calib", opts.calib); toast("Kalibráció elmentve!"); } }),
+      el("button.btn.sm", {
+        text: "📋 JSON másolás",
+        onclick: () => {
+          const str = JSON.stringify(opts.calib, null, 2);
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(str);
+          }
+          toast("JSON másolva! (konzolban is)");
+          console.log("GO2 Live3D Calibration:", str);
+        },
+      }),
+      el("button.btn.sm", {
+        text: "🔄 Alap",
+        onclick: () => {
+          opts.calib = {
+            robotZOffset: -0.10, robotYawDeg: 0,
+            lidarYawDeg: 88, lidarMirror: true, lidarZOffset: 0,
+            hesaiYawDeg: 180, hesaiMirror: false, hesaiZOffset: 0, hesaiPersistSec: 3.5,
+            mapFloorYawDeg: 0, mapFloorMirror: false, mapFloorXOffset: 0, mapFloorYOffset: 0, mapFloorZOffset: 0,
+          };
+          store.set("l3d_calib", opts.calib);
+          renderContent();
+          onChange();
+          toast("Alapértékek visszaállítva");
+        },
+      }),
+    ]);
+
+    container.append(
+      header,
+      sec("🐕 Robot Test (Avatar)"),
+      mkSlider("Magasság Z", "robotZOffset", -0.5, 0.5, 0.01, " m"),
+      mkSlider("Yaw forgatás", "robotYawDeg", -180, 180, 1, "°"),
+
+      sec("● Go2 Beépített LiDAR"),
+      mkSlider("Yaw forgatás", "lidarYawDeg", -180, 180, 1, "°"),
+      mkCheck("LiDAR tükrözés (Y-tengely)", "lidarMirror"),
+      mkSlider("Magasság Z", "lidarZOffset", -0.5, 0.5, 0.01, " m"),
+
+      sec("● Hesai LiDAR (Referencia)"),
+      mkSlider("Yaw forgatás", "hesaiYawDeg", -180, 180, 1, "°"),
+      mkCheck("Hesai tükrözés", "hesaiMirror"),
+      mkSlider("Magasság Z", "hesaiZOffset", -0.5, 0.5, 0.01, " m"),
+      mkSlider("Megmaradás", "hesaiPersistSec", 0.5, 10, 0.5, " s"),
+
+      sec("▦ 2D Padló Térkép"),
+      mkSlider("Yaw forgatás", "mapFloorYawDeg", -180, 180, 1, "°"),
+      mkCheck("Térkép tükrözés", "mapFloorMirror"),
+      mkSlider("X eltolás", "mapFloorXOffset", -5, 5, 0.05, " m"),
+      mkSlider("Y eltolás", "mapFloorYOffset", -5, 5, 0.05, " m"),
+      mkSlider("Z eltolás", "mapFloorZOffset", -0.5, 0.5, 0.01, " m"),
+
+      btnRow,
+    );
+  }
+
+  renderContent();
+  return container;
 }
 
 // ---------------------------------------------------------------------------
@@ -793,8 +934,10 @@ function makeScene(host) {
   liveMapFloorMesh.renderOrder = -1;
   scene.add(liveMapFloorMesh);
 
+  let lastGridData = null;
   function updateLiveMapFloor(d) {
     if (!d) { liveMapFloorMesh.visible = false; return; }
+    lastGridData = d;
     const W = d.width, H = d.height;
     const data = d.data || d.floor;
     if (!W || !H || !data) { liveMapFloorMesh.visible = false; return; }
@@ -823,6 +966,7 @@ function makeScene(host) {
     liveMapFloorMat.map = tex;
     liveMapFloorMat.needsUpdate = true;
 
+    const c = opts.calib || {};
     const res = d.resolution || 0.05;
     const widthM = W * res, heightM = H * res;
     if (!liveMapFloorMesh.userData.sized || liveMapFloorMesh.userData.w !== widthM || liveMapFloorMesh.userData.h !== heightM) {
@@ -832,9 +976,13 @@ function makeScene(host) {
       liveMapFloorMesh.userData.w = widthM;
       liveMapFloorMesh.userData.h = heightM;
     }
-    const ox = d.origin_x || 0, oy = d.origin_y || 0;
+    const ox = (d.origin_x || 0) + (c.mapFloorXOffset || 0);
+    const oy = (d.origin_y || 0) + (c.mapFloorYOffset || 0);
     liveMapFloorMesh.position.x = ox + widthM / 2;
+    liveMapFloorMesh.position.y = -0.02 + (c.mapFloorZOffset || 0);
     liveMapFloorMesh.position.z = -(oy + heightM / 2);
+    liveMapFloorMesh.rotation.z = ((c.mapFloorYawDeg || 0) * Math.PI) / 180;
+    liveMapFloorMesh.scale.x = c.mapFloorMirror ? -1 : 1;
     liveMapFloorMesh.visible = opts.mapFloor !== false;
   }
 
@@ -1111,24 +1259,35 @@ function makeScene(host) {
     setLiveMapFloor(d) { updateLiveMapFloor(d); },
     setCloud(name, points) {
       const l = layers[name];
-      if (!l) return;
+      if (!l || !Array.isArray(points)) return;
       const now = performance.now();
+      const cal = opts.calib || {};
 
       if (name === "hesai") {
         // Hesai Multi-frame Persistence
         const n = points.length;
+        const yawRad = ((cal.hesaiYawDeg || 0) * Math.PI) / 180;
+        const cosH = Math.cos(yawRad), sinH = Math.sin(yawRad);
+        const mirrorSign = cal.hesaiMirror ? -1 : 1;
+        const zOff = cal.hesaiZOffset || 0;
+
         const framePos = new Float32Array(n * 3);
         for (let i = 0; i < n; i++) {
           const pt = points[i];
-          const x = Array.isArray(pt) ? (pt[0] || 0) : (pt?.x || 0);
-          const y = Array.isArray(pt) ? (pt[1] || 0) : (pt?.y || 0);
+          let x = Array.isArray(pt) ? (pt[0] || 0) : (pt?.x || 0);
+          let y = Array.isArray(pt) ? (pt[1] || 0) : (pt?.y || 0);
           const z = Array.isArray(pt) ? (pt[2] || 0) : (pt?.z || 0);
-          framePos[i * 3 + 0] = x;
-          framePos[i * 3 + 1] = z;
-          framePos[i * 3 + 2] = -y;
+
+          y = y * mirrorSign;
+          const rx = cosH * x - sinH * y;
+          const ry = sinH * x + cosH * y;
+
+          framePos[i * 3 + 0] = rx;
+          framePos[i * 3 + 1] = z + zOff;
+          framePos[i * 3 + 2] = -ry;
         }
         hesaiFrames.push({ positions: framePos, count: n, timestamp: now });
-        const persistMs = (opts.persistSec || 3.5) * 1000;
+        const persistMs = (cal.hesaiPersistSec || opts.persistSec || 3.5) * 1000;
         while (hesaiFrames.length > 1 && (now - hesaiFrames[0].timestamp > persistMs)) {
           hesaiFrames.shift();
         }
@@ -1138,7 +1297,7 @@ function makeScene(host) {
         for (let i = 0; i < hesaiFrames.length; i++) total += hesaiFrames[i].count;
         const mergedPos = new Float32Array(total * 3);
         const mergedCol = new Float32Array(total * 3);
-        const c = new THREE.Color();
+        const cMat = new THREE.Color();
         let offset = 0;
         for (let i = 0; i < hesaiFrames.length; i++) {
           mergedPos.set(hesaiFrames[i].positions, offset);
@@ -1146,9 +1305,9 @@ function makeScene(host) {
           for (let j = 0; j < fCount; j++) {
             const zVal = hesaiFrames[i].positions[j * 3 + 1];
             const t = Math.max(0, Math.min(1, (zVal + 0.5) / 2.4));
-            c.setHSL(0.08 - t * 0.12, 0.9, 0.4 + t * 0.3);
+            cMat.setHSL(0.08 - t * 0.12, 0.9, 0.4 + t * 0.3);
             const pIdx = (offset / 3) + j;
-            mergedCol[pIdx * 3 + 0] = c.r; mergedCol[pIdx * 3 + 1] = c.g; mergedCol[pIdx * 3 + 2] = c.b;
+            mergedCol[pIdx * 3 + 0] = cMat.r; mergedCol[pIdx * 3 + 1] = cMat.g; mergedCol[pIdx * 3 + 2] = cMat.b;
           }
           offset += hesaiFrames[i].positions.length;
         }
@@ -1165,11 +1324,12 @@ function makeScene(host) {
       const n = points.length;
       const pos = new Float32Array(n * 3);
       const col = new Float32Array(n * 3);
-      const c = new THREE.Color();
+      const cMat = new THREE.Color();
       const isGo2 = (name === "go2");
-      const yawRad = (((window._calib ? window._calib.lidarYawDeg : opts.lidarYawDeg) || 0) * Math.PI) / 180;
+      const yawRad = (((cal.lidarYawDeg != null ? cal.lidarYawDeg : opts.lidarYawDeg) || 0) * Math.PI) / 180;
       const cosY = Math.cos(yawRad), sinY = Math.sin(yawRad);
-      const mirrorSign = ((window._calib ? window._calib.lidarMirror : opts.lidarMirror) !== false) ? -1 : 1;
+      const mirrorSign = ((cal.lidarMirror != null ? cal.lidarMirror : opts.lidarMirror) !== false) ? -1 : 1;
+      const zOff = cal.lidarZOffset || 0;
 
       for (let i = 0; i < n; i++) {
         const pt = points[i];
@@ -1185,10 +1345,10 @@ function makeScene(host) {
           y = ry;
         }
 
-        pos[i * 3] = x; pos[i * 3 + 1] = z; pos[i * 3 + 2] = -y;
+        pos[i * 3] = x; pos[i * 3 + 1] = z + zOff; pos[i * 3 + 2] = -y;
         const t = Math.max(0, Math.min(1, (z + 0.5) / 2.4));
-        c.setHSL(l.hueBase - t * 0.12, 0.85, 0.35 + t * 0.35);
-        col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+        cMat.setHSL(l.hueBase - t * 0.12, 0.85, 0.35 + t * 0.35);
+        col[i * 3] = cMat.r; col[i * 3 + 1] = cMat.g; col[i * 3 + 2] = cMat.b;
       }
       l.pts.geometry.dispose();
       const geo = new THREE.BufferGeometry();
@@ -1254,8 +1414,28 @@ function makeScene(host) {
     },
     setRobot(pose) {
       const s = store.state || {};
-      if (s.imu) { robotGroup.rotation.z = -(s.imu.pitch || 0); robotGroup.rotation.x = s.imu.roll || 0; }
+      const cal = opts.calib || {};
+      robotGroup.position.y = (THIGH_LEN + CALF_LEN * 0.55) + (cal.robotZOffset || 0);
+      const yawRad = ((cal.robotYawDeg || 0) * Math.PI) / 180;
+      if (s.imu) {
+        robotGroup.rotation.z = -(s.imu.pitch || 0);
+        robotGroup.rotation.x = s.imu.roll || 0;
+        robotGroup.rotation.y = yawRad;
+      } else {
+        robotGroup.rotation.y = yawRad;
+      }
       if (s.motor_q) applyMotorQ(s.motor_q);
+    },
+    refreshCalib() {
+      const cal = opts.calib || {};
+      robotGroup.position.y = (THIGH_LEN + CALF_LEN * 0.55) + (cal.robotZOffset || 0);
+      robotGroup.rotation.y = ((cal.robotYawDeg || 0) * Math.PI) / 180;
+      if (lastGridData) updateLiveMapFloor(lastGridData);
+      if (clouds.go2 && clouds.go2.points) this.setCloud("go2", clouds.go2.points);
+      if (clouds.hesai && clouds.hesai.points) {
+        hesaiFrames = [];
+        this.setCloud("hesai", clouds.hesai.points);
+      }
     },
     applyView() { place(); },
     applyZoom(z) { camRadius = z === "near" ? 1.6 : 6.0; place(); },
