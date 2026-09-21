@@ -564,8 +564,9 @@
     </div>
 
     <div class="panel" id="calib-panel">
-      <h3>🛠 LiDAR Kalibráció <span style="font-size:10px; color:var(--muted); font-weight:normal;">(Beépített 81° rögzítve &amp; Hesai)</span></h3>
-      <div class="calib-row"><label style="display:flex; align-items:center; gap:5px;"><input type="checkbox" id="calib-lidar-mirror" style="width:auto;"> Beépített LiDAR tükrözés</label></div>
+      <h3>🛠 LiDAR Kalibráció <span style="font-size:10px; color:var(--muted); font-weight:normal;">(Beépített &amp; Hesai)</span></h3>
+      <div class="calib-row"><label>Beépített LiDAR forgás</label><input type="range" id="calib-lidar-yaw" min="-180" max="180" step="1" value="88"><span id="calib-lidar-yaw-val">88°</span></div>
+      <div class="calib-row"><label style="display:flex; align-items:center; gap:5px;"><input type="checkbox" id="calib-lidar-mirror" checked style="width:auto;"> Beépített LiDAR tükrözés</label></div>
       <div class="calib-row"><label>Hesai forgás</label><input type="range" id="calib-hesai-yaw" min="-180" max="180" step="1" value="180"><span id="calib-hesai-yaw-val">180°</span></div>
       <div class="calib-row"><label style="display:flex; align-items:center; gap:5px;"><input type="checkbox" id="calib-hesai-mirror" style="width:auto;"> Hesai tükrözés</label></div>
       <div class="calib-row"><label>Hesai megmaradás</label><input type="range" id="calib-hesai-persist" min="0.5" max="30" step="0.5" value="3.5"><span id="calib-hesai-persist-val">3.5 s</span></div>
@@ -753,7 +754,7 @@ const CAM_RADIUS_MIN = 0.5, CAM_RADIUS_MAX = 6;
 window._calib = {
   robotX: 0, robotY: 0,
   avatarYawDeg: 0,
-  lidarYawDeg: 81, lidarMirror: false,
+  lidarYawDeg: 88, lidarMirror: true,
   hesaiYawDeg: 180, hesaiMirror: false,
   hesaiPersistSec: 3.5,
   hesaiFreeze: false,
@@ -770,9 +771,14 @@ window._calib = {
       valEl.textContent = isDeg ? Math.round(v) + "°" : (suffix ? v.toFixed(1) + suffix : v.toFixed(2));
     });
   }
+  bind("calib-lidar-yaw", "calib-lidar-yaw-val", "lidarYawDeg", true);
   bind("calib-hesai-yaw", "calib-hesai-yaw-val", "hesaiYawDeg", true);
   bind("calib-hesai-persist", "calib-hesai-persist-val", "hesaiPersistSec", false, " s");
-  document.getElementById("calib-lidar-mirror").addEventListener("change", (e) => { window._calib.lidarMirror = e.target.checked; });
+  const lidarMirrorCb = document.getElementById("calib-lidar-mirror");
+  if (lidarMirrorCb) {
+    lidarMirrorCb.checked = window._calib.lidarMirror;
+    lidarMirrorCb.addEventListener("change", (e) => { window._calib.lidarMirror = e.target.checked; });
+  }
   document.getElementById("calib-hesai-mirror").addEventListener("change", (e) => { window._calib.hesaiMirror = e.target.checked; });
   const freezeCb = document.getElementById("calib-hesai-freeze");
   if (freezeCb) {
