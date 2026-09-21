@@ -573,6 +573,26 @@ def lidar_cloud(source: str, limit: int = 6000) -> dict:
             "raw_count": len(pts), "error": None, "t": _now()}
 
 
+def get_objects() -> dict:
+    """Synthetic tracked objects for demonstration and testing."""
+    s = robot.snapshot()
+    pose = s["pose"]
+    t = _now()
+    angle = t * 0.4
+    px = pose["x"] + 1.8 * math.cos(angle * 0.5) + 1.2
+    py = pose["y"] + 1.2 * math.sin(angle * 0.5) - 0.4
+    obj = {
+        "id": 7,
+        "cls": "person",
+        "x": round(px, 3),
+        "y": round(py, 3),
+        "confidence": 0.94,
+        "last_seen": t,
+        "age_s": 0.05,
+    }
+    return {"objects": [obj], "count": 1, "perception_error": None, "t": t}
+
+
 def camera_list() -> list:
     return [{**c, "available": True, "recording": c["id"] in _recording,
              "frames": _recording.get(c["id"], {}).get("frames", 0)} for c in CAMERAS]

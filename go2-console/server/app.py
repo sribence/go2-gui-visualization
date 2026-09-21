@@ -301,6 +301,22 @@ def lidar_cloud(source: str, max: int = 6000):
     return JSONResponse(content={"source": source, "points": [], "count": 0, "raw_count": 0})
 
 
+@app.get("/api/objects")
+def get_objects():
+    try:
+        if hasattr(demo, "get_objects"):
+            return demo.get_objects()
+    except Exception:
+        pass
+    try:
+        r = requests.get("http://127.0.0.1:9102/objects", timeout=1.0)
+        if r.status_code == 200:
+            return JSONResponse(content=r.json())
+    except Exception:
+        pass
+    return JSONResponse(content={"objects": [], "count": 0, "perception_error": None, "t": time.time()})
+
+
 # ---------------------------------------------------------------------------
 # SLAM -- KISS-ICP odometry and the accumulated 3D map
 # ---------------------------------------------------------------------------

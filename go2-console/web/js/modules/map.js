@@ -8,9 +8,21 @@ const { api, el, $, clear, store, fmt, toast, guardedMotion } = await import("..
 
 let ui = {}, mapData = null, lastVersion = -1;
 let view = { scale: 1, ox: 0, oy: 0, fitted: false };
-let layers = { floor: true, walls: true, path: true, zones: true, grid: false };
+let layers = { floor: true, walls: true, path: true, zones: true, grid: false, objects: true };
 let waypoints = [];
 let zones = [];
+let trackedObjects = [];
+let objectsTimer = null;
+
+async function fetchObjects() {
+  try {
+    const res = await api.get("/api/objects");
+    if (res && Array.isArray(res.objects)) {
+      trackedObjects = res.objects;
+      draw();
+    }
+  } catch (e) {}
+}
 let drawingZone = null;
 let mode = "goto";        // goto | waypoint | zone
 let tab = "2d";
@@ -58,6 +70,7 @@ export default {
     bindCanvas();
     this._unsub = store.subscribe(onState);
     window.addEventListener("resize", resize);
+    if (!objectsTimer) objectsTimer = setInterval(fetchObjects, 400);
     resize();
   },
 
@@ -67,7 +80,7 @@ export default {
     const box = el("div.igroup", {}, [el("h4", { text: "Rétegek és eszközök" })]);
     for (const [k, label] of Object.entries({
       floor: "Padló-réteg", walls: "Fal-réteg", path: "Útvonal és cél",
-      zones: "Tiltott zónák", grid: "Rács",
+      zones: "Tiltott zónák", objects: "Személyek / Tárgyak", grid: "Rács",
     })) {
       const cb = el("input", { type: "checkbox", onchange: (e) => { layers[k] = e.target.checked; draw(); } });
       cb.checked = layers[k];
@@ -321,6 +334,47 @@ function draw() {
     ctx.fillStyle = s.armed ? "#4db8ff" : "#8496ab";
     ctx.beginPath(); ctx.moveTo(15, 0); ctx.lineTo(-9, 9); ctx.lineTo(-9, -9); ctx.closePath(); ctx.fill();
     ctx.restore();
+  }
+
+  if (layers.objects !== false && trackedObjects.length) {
+    const now = Date.now() / 1000;
+    for (const obj of trackedObjects) {
+      if (!obj || obj.x == null || obj.y == null) continue;
+      const age = obj.age_s ?? (obj.last_seen ? now - obj.last_seen : 0);
+      if (age > 2.0) continue;
+      const alpha = Math.max(0.2, Math.min(1.0, 1.0 - (age - 1.0)));
+      const [x, y] = worldToPx(obj.x, obj.y);
+
+      ctx.save();
+      ctx.globalAlpha = alpha;
+
+      ctx.strokeStyle = "rgba(255, 184, 77, 0.7)";
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      ctx.arc(x, y, 14 + Math.sin(now * 6) * 2.5, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.fillStyle = "#ffb84d";
+      ctx.beginPath();
+      ctx.arc(x, y - 6, 4.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.moveTo(x - 5, y + 6);
+      ctx.lineTo(x, y - 1);
+      ctx.lineTo(x + 5, y + 6);
+      ctx.lineWidth = 3.5;
+      ctx.strokeStyle = "#ffb84d";
+      ctx.stroke();
+
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "bold 10px sans-serif";
+      ctx.textAlign = "center";
+      const conf = obj.confidence ? ` ${Math.round(obj.confidence * 100)}%` : "";
+      ctx.fillText(`👤 #${obj.id}${conf}`, x, y - 13);
+
+      ctx.restore();
+    }
   }
 
   // scale bar

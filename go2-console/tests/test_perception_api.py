@@ -32,6 +32,15 @@ def test_perception_persons_endpoint():
     assert isinstance(data["persons"], list)
 
 
+def test_objects_endpoint():
+    response = client.get("/api/objects")
+    assert response.status_code == 200
+    data = response.json()
+    assert "objects" in data
+    assert "count" in data
+    assert isinstance(data["objects"], list)
+
+
 def test_perception_target_lock_endpoint():
     response = client.post("/api/perception/target", json={"track_id": 2})
     assert response.status_code == 200

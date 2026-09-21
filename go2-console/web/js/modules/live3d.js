@@ -460,8 +460,18 @@ async function tick() {
   if (opts.hesai) jobs.push(fetchCloud("hesai"));
   if (opts.map || opts.traj) jobs.push(fetchMap());
   if (opts.mapFloor) jobs.push(fetchGridMap());
+  jobs.push(fetchObjects());
   await Promise.all(jobs);
   renderStats();
+}
+
+async function fetchObjects() {
+  try {
+    const res = await api.get("/api/objects");
+    if (res && Array.isArray(res.objects)) {
+      three?.setObjects(res.objects);
+    }
+  } catch (e) {}
 }
 
 async function fetchGridMap() {
@@ -950,8 +960,140 @@ function makeScene(host) {
     });
   }
 
+  const humanObjectsGroup = new THREE.Group();
+  scene.add(humanObjectsGroup);
+  const humanGroupMap = new Map();
+
+  function createHumanDummyMesh() {
+    const dummyGroup = new THREE.Group();
+
+    const matBody = new THREE.MeshStandardMaterial({
+      color: 0x3a4f66, emissive: 0x0d1a26, roughness: 0.4, metalness: 0.3
+    });
+    const matAccent = new THREE.MeshStandardMaterial({
+      color: 0xffb84d, emissive: 0x4a2e00, roughness: 0.3
+    });
+
+    const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.20, 0.15, 0.65, 12), matBody);
+    torso.position.y = 1.05;
+    dummyGroup.add(torso);
+
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.13, 14, 14), matAccent);
+    head.position.y = 1.55;
+    dummyGroup.add(head);
+
+    const visor = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.05, 0.12), new THREE.MeshBasicMaterial({ color: 0x22e5ff }));
+    visor.position.set(0.08, 1.55, 0);
+    dummyGroup.add(visor);
+
+    const hips = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.1, 0.18), matBody);
+    hips.position.y = 0.7;
+    dummyGroup.add(hips);
+
+    const legL = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.045, 0.7, 10), matBody);
+    legL.position.set(0, 0.35, 0.08);
+    dummyGroup.add(legL);
+
+    const legR = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.045, 0.7, 10), matBody);
+    legR.position.set(0, 0.35, -0.08);
+    dummyGroup.add(legR);
+
+    const armL = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.035, 0.6, 10), matBody);
+    armL.position.set(0, 1.0, 0.22);
+    armL.rotation.z = -0.15;
+    dummyGroup.add(armL);
+
+    const armR = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.035, 0.6, 10), matBody);
+    armR.position.set(0, 1.0, -0.22);
+    armR.rotation.z = -0.15;
+    dummyGroup.add(armR);
+
+    const ringGeo = new THREE.RingGeometry(0.35, 0.42, 32);
+    const ringMat = new THREE.MeshBasicMaterial({ color: 0xffb84d, side: THREE.DoubleSide, transparent: true, opacity: 0.6 });
+    const scannerRing = new THREE.Mesh(ringGeo, ringMat);
+    scannerRing.rotation.x = Math.PI / 2;
+    scannerRing.position.y = 0.01;
+    dummyGroup.add(scannerRing);
+
+    if (window.THREE && window.THREE.ColladaLoader) {
+      try {
+        const daeLoader = new THREE.ColladaLoader();
+        daeLoader.load("/static/models/person_dummy.dae", (collada) => {
+          if (collada && collada.scene) {
+            const model = collada.scene;
+            model.traverse((c) => {
+              if (c.isMesh) c.material = matBody;
+            });
+            torso.visible = false;
+            hips.visible = false;
+            legL.visible = false;
+            legR.visible = false;
+            dummyGroup.add(model);
+          }
+        }, undefined, () => {});
+      } catch (e) {}
+    }
+
+    return { group: dummyGroup, ring: scannerRing };
+  }
+
+  function setObjects(objs) {
+    if (!Array.isArray(objs)) return;
+    const now = Date.now() / 1000;
+    const currentIds = new Set();
+    const robotPose = store.state?.pose || { x: 0, y: 0, yaw: 0 };
+
+    for (const obj of objs) {
+      if (!obj || obj.x == null || obj.y == null) continue;
+      const id = obj.id ?? 0;
+      currentIds.add(id);
+
+      let entry = humanGroupMap.get(id);
+      if (!entry) {
+        entry = createHumanDummyMesh();
+        humanGroupMap.set(id, entry);
+        humanObjectsGroup.add(entry.group);
+      }
+
+      const dx = obj.x - (robotPose.x || 0);
+      const dy = obj.y - (robotPose.y || 0);
+      const yaw = robotPose.yaw || 0;
+      const fwd = dx * Math.cos(yaw) + dy * Math.sin(yaw);
+      const left = -dx * Math.sin(yaw) + dy * Math.cos(yaw);
+
+      const targetPos = new THREE.Vector3(
+        robotGroup.position.x + fwd,
+        0,
+        robotGroup.position.z - left
+      );
+      entry.group.position.lerp(targetPos, 0.45);
+      entry.group.lookAt(robotGroup.position.x, 0.8, robotGroup.position.z);
+
+      const dist = Math.hypot(dx, dy).toFixed(1);
+      const conf = obj.confidence ? ` ${Math.round(obj.confidence * 100)}%` : "";
+      const age = obj.age_s ?? (obj.last_seen ? now - obj.last_seen : 0);
+
+      if (entry.label) entry.group.remove(entry.label);
+      entry.label = makeTextSprite(`Ember #${id}${conf} · ${dist}m`, "#ffb84d");
+      entry.label.position.set(0, 1.85, 0);
+      entry.group.add(entry.label);
+
+      const opacity = age > 1.5 ? Math.max(0.15, 1.0 - (age - 1.5) * 2) : 1.0;
+      entry.group.visible = opacity > 0.05;
+      if (entry.ring) entry.ring.material.opacity = 0.6 * opacity;
+    }
+
+    for (const [id, entry] of humanGroupMap.entries()) {
+      if (!currentIds.has(id)) {
+        humanObjectsGroup.remove(entry.group);
+        humanGroupMap.delete(id);
+      }
+    }
+  }
+
   return {
     get pointSize() { return pointSize; },
+    setObjects(objs) { setObjects(objs); },
     setPointSize(v) {
       pointSize = v;
       for (const [name, l] of Object.entries(layers)) {

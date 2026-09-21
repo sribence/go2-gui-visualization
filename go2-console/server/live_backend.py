@@ -802,6 +802,16 @@ def lidar_cloud(source: str, limit: int = 6000) -> dict:
     }
 
 
+def get_objects() -> dict:
+    try:
+        r = _sess().get(f"{MAPPING}/objects", timeout=1.0)
+        if r.status_code == 200:
+            return r.json()
+    except Exception:
+        pass
+    return {"objects": [], "count": 0, "perception_error": None, "t": _now()}
+
+
 def camera_list() -> list:
     healthy = robot.snapshot()["link"]["healthy"]
     lidar = {**LIDAR_CAM, "available": healthy, "recording": False, "frames": 0}

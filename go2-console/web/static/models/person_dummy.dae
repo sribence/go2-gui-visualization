@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="utf-8"?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset>
+    <contributor>
+      <author>NERO_GO2 System</author>
+      <authoring_tool>Antigravity 3D Generator</authoring_tool>
+    </contributor>
+    <created>2026-09-21T20:00:00</created>
+    <modified>2026-09-21T20:00:00</modified>
+    <unit name="meter" meter="1"/>
+    <up_axis>Z_UP</up_axis>
+  </asset>
+  <library_materials>
+    <material id="DummyMat-material" name="DummyMat">
+      <instance_effect url="#DummyMat-effect"/>
+    </material>
+  </library_materials>
+  <library_effects>
+    <effect id="DummyMat-effect">
+      <profile_COMMON>
+        <technique sid="common">
+          <phong>
+            <emission><color>0.05 0.25 0.35 1</color></emission>
+            <ambient><color>0.1 0.3 0.4 1</color></ambient>
+            <diffuse><color>0.2 0.7 0.9 1</color></diffuse>
+            <specular><color>0.5 0.9 1.0 1</color></specular>
+            <shininess><float>30</float></shininess>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+  </library_effects>
+  <library_geometries>
+    <geometry id="HumanBody-mesh" name="HumanBody">
+      <mesh>
+        <source id="HumanBody-mesh-positions">
+          <float_array id="HumanBody-mesh-positions-array" count="72">
+            -0.20 -0.10 0.00
+             0.20 -0.10 0.00
+             0.20  0.10 0.00
+            -0.20  0.10 0.00
+            -0.22 -0.12 0.90
+             0.22 -0.12 0.90
+             0.22  0.12 0.90
+            -0.22  0.12 0.90
+            -0.25 -0.14 1.40
+             0.25 -0.14 1.40
+             0.25  0.14 1.40
+            -0.25  0.14 1.40
+            -0.12 -0.12 1.45
+             0.12 -0.12 1.45
+             0.12  0.12 1.45
+            -0.12  0.12 1.45
+            -0.13 -0.13 1.75
+             0.13 -0.13 1.75
+             0.13  0.13 1.75
+            -0.13  0.13 1.75
+            -0.40 -0.05 0.85
+             0.40 -0.05 0.85
+             0.40  0.05 0.85
+            -0.40  0.05 0.85
+          </float_array>
+          <technique_common>
+            <accessor source="#HumanBody-mesh-positions-array" count="24" stride="3">
+              <param name="X" type="float"/>
+              <param name="Y" type="float"/>
+              <param name="Z" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>
+        <source id="HumanBody-mesh-normals">
+          <float_array id="HumanBody-mesh-normals-array" count="18">
+             0  0 -1
+             0  0  1
+             1  0  0
+            -1  0  0
+             0  1  0
+             0 -1  0
+          </float_array>
+          <technique_common>
+            <accessor source="#HumanBody-mesh-normals-array" count="6" stride="3">
+              <param name="X" type="float"/>
+              <param name="Y" type="float"/>
+              <param name="Z" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="HumanBody-mesh-vertices">
+          <input semantic="POSITION" source="#HumanBody-mesh-positions"/>
+        </vertices>
+        <polylist material="DummyMat-material" count="20">
+          <input semantic="VERTEX" source="#HumanBody-mesh-vertices" offset="0"/>
+          <input semantic="NORMAL" source="#HumanBody-mesh-normals" offset="1"/>
+          <vcount>4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4</vcount>
+          <p>
+            0 0 1 0 2 0 3 0
+            4 1 7 1 6 1 5 1
+            0 2 4 2 5 2 1 2
+            1 2 5 2 6 2 2 2
+            2 2 6 2 7 2 3 2
+            3 2 7 2 4 2 0 2
+            4 1 8 1 9 1 5 1
+            5 1 9 1 10 1 6 1
+            6 1 10 1 11 1 7 1
+            7 1 11 1 8 1 4 1
+            8 1 12 1 13 1 9 1
+            12 1 16 1 17 1 13 1
+            13 1 17 1 18 1 14 1
+            14 1 18 1 19 1 15 1
+            15 1 19 1 16 1 12 1
+            16 1 19 1 18 1 17 1
+            8 3 20 3 23 3 11 3
+            9 2 10 2 22 2 21 2
+            20 0 21 0 22 0 23 0
+            20 1 23 1 22 1 21 1
+          </p>
+        </polylist>
+      </mesh>
+    </geometry>
+  </library_geometries>
+  <library_visual_scenes>
+    <visual_scene id="Scene" name="Scene">
+      <node id="HumanDummy" name="HumanDummy" type="NODE">
+        <translate sid="location">0 0 0</translate>
+        <rotate sid="rotationZ">0 0 1 0</rotate>
+        <scale sid="scale">1 1 1</scale>
+        <instance_geometry url="#HumanBody-mesh">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="DummyMat-material" target="#DummyMat-material"/>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+    </visual_scene>
+  </library_visual_scenes>
+  <scene>
+    <instance_visual_scene url="#Scene"/>
+  </scene>
+</COLLADA>
