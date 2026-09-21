@@ -110,6 +110,151 @@ export default {
       ]),
     ]);
 
+    // --- LED & RGB Control Card -----------------------------------------
+    let rgbCycleTimer = null, rgbHue = 0;
+
+    function hsvToRgb(h, s, v) {
+      let r, g, b;
+      let i = Math.floor(h * 6);
+      let f = h * 6 - i;
+      let p = v * (1 - s);
+      let q = v * (1 - f * s);
+      let t = v * (1 - (1 - f) * s);
+      switch (i % 6) {
+        case 0: r = v; g = t; b = p; break;
+        case 1: r = q; g = v; b = p; break;
+        case 2: r = p; g = v; b = t; break;
+        case 3: r = p; g = q; b = v; break;
+        case 4: r = t; g = p; b = v; break;
+        case 5: r = v; g = p; b = q; break;
+      }
+      return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+    }
+
+    ui.ledStatus = el("span.pill", { text: "RGB vezérlő" });
+
+    async function sendLed(r, g, b, quiet = false) {
+      try {
+        await api.post("/api/led", { r, g, b });
+        if (ui.ledStatus) ui.ledStatus.textContent = `🟢 RGB(${r},${g},${b})`;
+      } catch (e) {
+        if (ui.ledStatus) ui.ledStatus.textContent = `⚠️ 503 (Voice DDS offline)`;
+        if (!quiet) toast(e.message || "a voice/audio DDS szolgáltatás nem válaszol a roboton (503)", "warn");
+      }
+    }
+
+    async function sendLedPreset(name) {
+      stopRgbCycle();
+      try {
+        await api.post(`/api/led/preset/${name}`);
+        if (ui.ledStatus) ui.ledStatus.textContent = `🟢 Preset: ${name}`;
+      } catch (e) {
+        if (ui.ledStatus) ui.ledStatus.textContent = `⚠️ 503 (Voice DDS offline)`;
+        toast(e.message || "a voice/audio DDS szolgáltatás nem válaszol a roboton (503)", "warn");
+      }
+    }
+
+    function startRgbCycle() {
+      if (rgbCycleTimer) clearInterval(rgbCycleTimer);
+      if (ui.rgbBtn) {
+        ui.rgbBtn.classList.add("primary");
+        ui.rgbBtn.textContent = "🌈 Gamer RGB Szivárvány (BE)";
+      }
+      rgbCycleTimer = setInterval(() => {
+        rgbHue = (rgbHue + 0.04) % 1.0;
+        const [r, g, b] = hsvToRgb(rgbHue, 1.0, 1.0);
+        if (ui.colorPicker) {
+          ui.colorPicker.value = "#" + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
+        }
+        sendLed(r, g, b, true);
+      }, 350);
+    }
+
+    function stopRgbCycle() {
+      if (rgbCycleTimer) {
+        clearInterval(rgbCycleTimer);
+        rgbCycleTimer = null;
+      }
+      if (ui.rgbBtn) {
+        ui.rgbBtn.classList.remove("primary");
+        ui.rgbBtn.textContent = "🌈 Gamer RGB Szivárvány Mód";
+      }
+    }
+
+    this._stopRgbCycle = stopRgbCycle;
+
+    const LED_PRESETS = [
+      ["off", "⚫ Ki"],
+      ["white", "⚪ Fehér"],
+      ["red", "🔴 Piros"],
+      ["green", "🟢 Zöld"],
+      ["blue", "🔵 Kék"],
+      ["yellow", "🟡 Sárga"],
+      ["cyan", "🩵 Cián"],
+      ["purple", "🟣 Lila"],
+      ["pink", "🩷 Rózsaszín"],
+      ["orange", "🟠 Narancs"],
+    ];
+
+    const presetRow = el("div.row.tight", { style: { gap: "6px", flexWrap: "wrap", marginBottom: "8px" } });
+    for (const [id, label] of LED_PRESETS) {
+      presetRow.appendChild(el("button.btn.sm", {
+        text: label,
+        onclick: () => sendLedPreset(id)
+      }));
+    }
+
+    ui.brightSlider = el("input", {
+      type: "range", min: 0, max: 100, value: 100, style: { width: "100%" },
+      oninput: (e) => {
+        stopRgbCycle();
+        const pct = parseInt(e.target.value);
+        const val = Math.round((pct / 100) * 255);
+        sendLed(val, val, val, true);
+      }
+    });
+
+    ui.colorPicker = el("input", {
+      type: "color", value: "#ffffff", style: { cursor: "pointer", width: "42px", height: "32px", border: "none", padding: "0", background: "none" },
+      oninput: (e) => {
+        stopRgbCycle();
+        const hex = e.target.value;
+        const r = parseInt(hex.slice(1, 3), 16);
+        const g = parseInt(hex.slice(3, 5), 16);
+        const b = parseInt(hex.slice(5, 7), 16);
+        sendLed(r, g, b);
+      }
+    });
+
+    ui.rgbBtn = el("button.btn", {
+      text: "🌈 Gamer RGB Szivárvány Mód",
+      onclick: () => {
+        if (rgbCycleTimer) stopRgbCycle();
+        else startRgbCycle();
+      }
+    });
+
+    const ledCard = el("div.card", {}, [
+      el("h3", {}, [el("span", { text: "💡 LED Színvezérlő & Lámpa Mód" }), ui.ledStatus]),
+      el("div.body", {}, [
+        el("div", { style: { fontSize: "11px", color: "var(--dim)", marginBottom: "6px" }, text: "Gyors szín beállítások:" }),
+        presetRow,
+        el("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", borderTop: "1px solid var(--border)", paddingTop: "10px", marginTop: "8px" } }, [
+          el("div", {}, [
+            el("label", { style: { fontSize: "12px", fontWeight: "bold" }, text: "☀️ Fényerősség (Lámpa mód):" }),
+            ui.brightSlider
+          ]),
+          el("div.stack", { style: { gap: "6px" } }, [
+            el("div.row", { style: { alignItems: "center", gap: "8px" } }, [
+              el("label", { style: { fontSize: "12px", fontWeight: "bold" }, text: "🎨 Egyedi Szín:" }),
+              ui.colorPicker
+            ]),
+            ui.rgbBtn
+          ])
+        ])
+      ])
+    ]);
+
     // --- gamepad --------------------------------------------------------
     ui.pad = el("div");
     const padCard = el("div.card", {}, [
@@ -125,8 +270,6 @@ export default {
     ]);
 
     // --- camera feeds ---------------------------------------------------
-    // Any mix of feeds, side by side: the tile count drives the layout, so
-    // one selection is full-size and four fall into a 2x2.
     ui.camToggles = el("div.camtoggles");
     ui.camGrid = el("div.camgrid.embedded");
     const camCard = el("div.card.pad0", {}, [
@@ -136,6 +279,8 @@ export default {
 
     body.append(
       el("div.grid.g2", {}, [driveCard, el("div.stack", {}, [gaitCard, padCard])]),
+      el("div", { style: { height: "12px" } }),
+      ledCard,
       el("div", { style: { height: "12px" } }),
       camCard,
       el("div", { style: { height: "12px" } }),
@@ -163,13 +308,12 @@ export default {
   },
 
   onLeave() {
+    if (this._stopRgbCycle) this._stopRgbCycle();
     window.removeEventListener("keydown", onKeyDown);
     window.removeEventListener("keyup", onKeyUp);
     window.removeEventListener("blur", stopNow);
     clearInterval(timer); timer = null;
     stopNow();
-    // MJPEG connections stay open on a hidden <img>, so drop them on the
-    // way out instead of leaving one per feed running in the background.
     stopStreams();
   },
 };

@@ -393,6 +393,67 @@ class LiveRobot:
         log("info", "motion", f"akadálykerülés: {enable}")
         return True, None
 
+    def get_led(self):
+        if not MOTION:
+            return {"r": 0, "g": 0, "b": 0, "error": "nincs mozgás-szolgáltatás bekötve"}
+        try:
+            r = _sess().get(f"{MOTION}/led", timeout=AUX_TIMEOUT)
+            return r.json()
+        except Exception as exc:
+            return {"r": 0, "g": 0, "b": 0, "error": _detail(exc)}
+
+    def set_led(self, r: int, g: int, b: int):
+        if not MOTION:
+            return False, "csak megfigyelő mód: nincs mozgás-szolgáltatás bekötve"
+        try:
+            r_resp = _sess().post(f"{MOTION}/led", json={"r": int(r), "g": int(g), "b": int(b)}, timeout=CMD_TIMEOUT)
+            if r_resp.status_code == 503:
+                return False, _detail(r_resp) or "a voice/audio DDS szolgáltatás nem válaszol a roboton (503)"
+            r_resp.raise_for_status()
+            log("info", "motion", f"LED szín beállítva: RGB({r},{g},{b})")
+            return True, None
+        except Exception as exc:
+            err = _detail(exc)
+            log("warn", "motion", f"LED szín beállítás sikertelen: {err}")
+            return False, err
+
+    def get_led_presets(self):
+        default_presets = {
+            "off": {"r": 0, "g": 0, "b": 0},
+            "white": {"r": 255, "g": 255, "b": 255},
+            "red": {"r": 255, "g": 0, "b": 0},
+            "green": {"r": 0, "g": 255, "b": 0},
+            "blue": {"r": 0, "g": 0, "b": 255},
+            "yellow": {"r": 255, "g": 255, "b": 0},
+            "cyan": {"r": 0, "g": 255, "b": 255},
+            "magenta": {"r": 255, "g": 0, "b": 255},
+            "orange": {"r": 255, "g": 128, "b": 0},
+            "purple": {"r": 128, "g": 0, "b": 255},
+            "pink": {"r": 255, "g": 105, "b": 180},
+            "warm_white": {"r": 255, "g": 200, "b": 120},
+        }
+        if not MOTION:
+            return default_presets
+        try:
+            return _sess().get(f"{MOTION}/led/presets", timeout=AUX_TIMEOUT).json()
+        except Exception:
+            return default_presets
+
+    def set_led_preset(self, name: str):
+        if not MOTION:
+            return False, "csak megfigyelő mód: nincs mozgás-szolgáltatás bekötve"
+        try:
+            r_resp = _sess().post(f"{MOTION}/led/preset/{name}", timeout=CMD_TIMEOUT)
+            if r_resp.status_code == 503:
+                return False, _detail(r_resp) or "a voice/audio DDS szolgáltatás nem válaszol a roboton (503)"
+            r_resp.raise_for_status()
+            log("info", "motion", f"LED preset beállítva: {name}")
+            return True, None
+        except Exception as exc:
+            err = _detail(exc)
+            log("warn", "motion", f"LED preset sikertelen: {err}")
+            return False, err
+
     def goto(self, x, y):
         # mapping's explore loop and navigation both drive the same robot and
         # neither knows about the other; running them together makes each

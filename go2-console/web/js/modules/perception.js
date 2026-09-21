@@ -1096,6 +1096,19 @@ export default {
     }
   },
 
+  lastPurpleLedTime: 0,
+  triggerTargetLed(data) {
+    const hasTarget = data && (data.target_id != null || (Array.isArray(data.persons) && data.persons.length > 0));
+    const mode = lastFollowData ? lastFollowData.mode : "off";
+    if (hasTarget && mode !== "off") {
+      const now = Date.now();
+      if (now - this.lastPurpleLedTime > 4000) {
+        this.lastPurpleLedTime = now;
+        api.post("/api/led/preset/purple").catch(() => {});
+      }
+    }
+  },
+
   updatePersons(data) {
     if (!data) return;
     lastPersonsData = data;
@@ -1103,6 +1116,7 @@ export default {
     this.renderRadar(data);
     this.renderTable(data);
     this.renderStepper();
+    this.triggerTargetLed(data);
   },
 
   updateFollowUI(data) {

@@ -236,6 +236,40 @@ class DemoRobot:
         log("info", "core", f"akadálykerülés: {enable}")
         return True, None
 
+    def get_led(self):
+        with self.lock:
+            led = getattr(self, "led", {"r": 0, "g": 0, "b": 0})
+            return {"r": led["r"], "g": led["g"], "b": led["b"], "audio_error": None}
+
+    def set_led(self, r: int, g: int, b: int):
+        with self.lock:
+            self.led = {"r": max(0, min(255, int(r))), "g": max(0, min(255, int(g))), "b": max(0, min(255, int(b)))}
+        log("info", "core", f"LED szín beállítva: RGB({r},{g},{b})")
+        return True, None
+
+    def get_led_presets(self):
+        return {
+            "off": {"r": 0, "g": 0, "b": 0},
+            "white": {"r": 255, "g": 255, "b": 255},
+            "red": {"r": 255, "g": 0, "b": 0},
+            "green": {"r": 0, "g": 255, "b": 0},
+            "blue": {"r": 0, "g": 0, "b": 255},
+            "yellow": {"r": 255, "g": 255, "b": 0},
+            "cyan": {"r": 0, "g": 255, "b": 255},
+            "magenta": {"r": 255, "g": 0, "b": 255},
+            "orange": {"r": 255, "g": 128, "b": 0},
+            "purple": {"r": 128, "g": 0, "b": 255},
+            "pink": {"r": 255, "g": 105, "b": 180},
+            "warm_white": {"r": 255, "g": 200, "b": 120},
+        }
+
+    def set_led_preset(self, name: str):
+        presets = self.get_led_presets()
+        if name not in presets:
+            return False, f"ismeretlen preset: {name}"
+        p = presets[name]
+        return self.set_led(p["r"], p["g"], p["b"])
+
     def goto(self, x, y):
         with self.lock:
             if not self.armed or self.estopped:

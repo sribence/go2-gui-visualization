@@ -18,8 +18,25 @@ export default {
     ui.gridSel = el("select", { style: { width: "auto" }, onchange: (e) => setGrid(e.target.value) },
       ["1x1", "2x1", "2x2", "3x3"].map((g) => el("option", { value: g, text: g })));
     ui.gridSel.value = store.get("cam.grid", "2x2");
+    const lightSlider = el("input", {
+      type: "range", min: 0, max: 100, value: 100,
+      title: "💡 Go2 LED Fényerősség (Lámpa mód)",
+      style: { width: "80px", cursor: "pointer" },
+      oninput: (e) => {
+        const pct = parseInt(e.target.value);
+        const val = Math.round((pct / 100) * 255);
+        api.post("/api/led", { r: val, g: val, b: val }).catch(err => {
+          toast(err.message || "a voice/audio DDS szolgáltatás nem válaszol a roboton (503)", "warn");
+        });
+      }
+    });
+
     tools.append(
       ui.gridSel,
+      el("div.row", { style: { alignItems: "center", gap: "6px", marginLeft: "6px" } }, [
+        el("span", { text: "💡 Lámpa:" }),
+        lightSlider
+      ]),
       el("button.btn", { text: "📸 Pillanatkép mind", onclick: snapAll }),
       el("button.btn", { text: "⏺ Felvétel mind", onclick: () => recordAll(true) }),
       el("button.btn", { text: "⏹ Felvétel stop", onclick: () => recordAll(false) }),

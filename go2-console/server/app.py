@@ -181,6 +181,44 @@ async def obstacle_avoid(request: Request):
     return {"ok": True, "obstacle_avoid": enable}
 
 
+@app.get("/api/led")
+def get_led():
+    if hasattr(demo.robot, "get_led"):
+        return demo.robot.get_led()
+    return {"r": 0, "g": 0, "b": 0}
+
+
+@app.post("/api/led")
+async def set_led(request: Request):
+    body = await request.json()
+    r = int(body.get("r", 0))
+    g = int(body.get("g", 0))
+    b = int(body.get("b", 0))
+    if hasattr(demo.robot, "set_led"):
+        ok, err = demo.robot.set_led(r, g, b)
+        if not ok:
+            status_code = 503 if ("503" in str(err) or "voice" in str(err).lower()) else 409
+            raise HTTPException(status_code=status_code, detail=err)
+    return {"ok": True, "r": r, "g": g, "b": b}
+
+
+@app.get("/api/led/presets")
+def get_led_presets():
+    if hasattr(demo.robot, "get_led_presets"):
+        return demo.robot.get_led_presets()
+    return {}
+
+
+@app.post("/api/led/preset/{name}")
+async def set_led_preset(name: str):
+    if hasattr(demo.robot, "set_led_preset"):
+        ok, err = demo.robot.set_led_preset(name)
+        if not ok:
+            status_code = 503 if ("503" in str(err) or "voice" in str(err).lower()) else 409
+            raise HTTPException(status_code=status_code, detail=err)
+    return {"ok": True, "preset": name}
+
+
 @app.post("/api/manual")
 async def manual(request: Request):
     body = await request.json()
