@@ -186,6 +186,29 @@ class LiveRobot:
                             break
                     except Exception:
                         continue
+            if not fetched_data:
+                try:
+                    r = _sess().get("http://127.0.0.1:5002/showcase_data", timeout=0.8, stream=True)
+                    if r.status_code == 200:
+                        for line in r.iter_lines():
+                            line_str = line.decode("utf-8") if isinstance(line, bytes) else line
+                            if line_str.startswith("data: "):
+                                d = _json.loads(line_str[6:])
+                                fetched_data = {
+                                    "pose": {"x": d.get("position_x", 0.0), "y": d.get("position_y", 0.0), "z": 0.0} if d.get("position_x") is not None else None,
+                                    "imu": {"roll": d.get("roll"), "pitch": d.get("pitch"), "yaw": d.get("yaw")},
+                                    "motor_q": d.get("motor_q", []),
+                                    "motor_tau": d.get("motor_tau", []),
+                                    "motor_temps": d.get("motor_temp", []),
+                                    "max_motor_temp": max(d.get("motor_temp", [0])) if d.get("motor_temp") else None,
+                                    "battery": {"percent": int((d.get("voltage", 28) - 22) / 8 * 100) if d.get("voltage") else 85, "voltage": d.get("voltage"), "current": d.get("current")},
+                                    "armed": d.get("armed", False),
+                                    "mode": d.get("mode_label", "STANDBY")
+                                }
+                                break
+                except Exception:
+                    pass
+
             if fetched_data:
                 with self.lock:
                     self._core = fetched_data
