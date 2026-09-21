@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import os
 import time
+import requests
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
@@ -221,12 +223,17 @@ def get_map():
                 if line_str.startswith("data: "):
                     payload = json.loads(line_str[6:])
                     if payload.get("ready") and payload.get("data"):
+                        def _clean_num(val, default=-10.0):
+                            if isinstance(val, (int, float)):
+                                return default if math.isnan(val) else float(val)
+                            return default
+
                         return JSONResponse(content={
-                            "resolution": payload.get("resolution", 0.05),
-                            "origin_x": payload.get("origin_x", 0.0),
-                            "origin_y": payload.get("origin_y", 0.0),
-                            "width": payload.get("width", 0),
-                            "height": payload.get("height", 0),
+                            "resolution": float(payload.get("resolution", 0.05)),
+                            "origin_x": _clean_num(payload.get("origin_x"), -10.0),
+                            "origin_y": _clean_num(payload.get("origin_y"), -10.0),
+                            "width": int(payload.get("width", 0)),
+                            "height": int(payload.get("height", 0)),
                             "level_id": "1",
                             "floor": payload.get("data", []),
                             "walls": [],
@@ -256,9 +263,10 @@ def lidar_cloud(source: str, max: int = 6000):
     if source not in ("go2", "hesai"):
         raise HTTPException(status_code=404, detail=f"unknown lidar source {source}")
     try:
-        res = demo.lidar_cloud(source, max)
-        if res.get("points") and len(res["points"]) > 0:
-            return JSONResponse(content=res)
+        if hasattr(demo, "lidar_cloud"):
+            res = demo.lidar_cloud(source, max)
+            if res.get("points") and len(res["points"]) > 0:
+                return JSONResponse(content=res)
     except Exception:
         pass
 
@@ -269,18 +277,22 @@ def lidar_cloud(source: str, max: int = 6000):
                     r = requests.get(url, timeout=1.5)
                     if r.status_code == 200:
                         pts = r.json()
+                        if isinstance(pts, dict) and "points" in pts:
+                            pts = pts["points"]
                         if isinstance(pts, list):
                             return JSONResponse(content={"source": "go2", "points": pts[:max], "count": len(pts[:max]), "raw_count": len(pts)})
                 except Exception:
                     continue
         elif source == "hesai":
-            for url in (f"http://127.0.0.1:5002/lidar_hesai_proxy?limit={max}", f"http://127.0.0.1:5003/points?limit={max}"):
+            for url in (f"http://127.0.0.1:5002/lidar_hesai_proxy?limit={max}", f"http://127.0.0.1:5003/lidar?limit={max}"):
                 try:
                     r = requests.get(url, timeout=1.5)
                     if r.status_code == 200:
                         pts = r.json()
+                        if isinstance(pts, dict) and "points" in pts:
+                            pts = pts["points"]
                         if isinstance(pts, list):
-                            return JSONResponse(content={"source": "hesai", "points": pts, "count": len(pts), "raw_count": len(pts)})
+                            return JSONResponse(content={"source": "hesai", "points": pts[:max], "count": len(pts[:max]), "raw_count": len(pts)})
                 except Exception:
                     continue
     except Exception:
