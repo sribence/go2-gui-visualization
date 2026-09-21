@@ -870,44 +870,52 @@ def camera_frame(cam_id: str, quality: int = 75) -> bytes:
         return data
 
 
+def _read_mjpeg_frame(url: str, timeout: float = 1.0) -> Optional[bytes]:
+    """Extracts a single JPEG image frame from an MJPEG stream URL."""
+    try:
+        r = _sess().get(url, timeout=timeout, stream=True)
+        if r.status_code == 200:
+            buf = bytearray()
+            for chunk in r.iter_content(chunk_size=2048):
+                buf.extend(chunk)
+                start = buf.find(b"\xff\xd8")
+                end = buf.find(b"\xff\xd9", start if start != -1 else 0)
+                if start != -1 and end != -1:
+                    return bytes(buf[start:end + 2])
+                if len(buf) > 600000:
+                    break
+    except Exception:
+        pass
+    return None
+
+
 def _fetch_frame(cam_id: str) -> bytes:
     if cam_id in ("front", "robot", "go2"):
         try:
-            return _get(CORE, "/camera.jpg").content
+            r = _sess().get("http://127.0.0.1:5001/camera.jpg", timeout=1.0)
+            if r.status_code == 200 and len(r.content) > 500:
+                return r.content
         except Exception:
             pass
+        frame = _read_mjpeg_frame("http://127.0.0.1:5002/camera_feed", timeout=1.0)
+        if frame:
+            return frame
         try:
-            r = requests.get("http://127.0.0.1:5002/camera_feed", timeout=1.0, stream=True)
-            if r.status_code == 200:
-                for line in r.iter_lines():
-                    if line.startswith(b"Content-Length:"):
-                        length = int(line.split(b":")[1].strip())
-                        r.raw.read(2)
-                        return r.raw.read(length)
-        except Exception:
-            pass
-        try:
-            r = requests.get("http://127.0.0.1:5001/camera_feed", timeout=1.0)
-            if r.status_code == 200:
+            r = _get(CORE, "/camera.jpg")
+            if r.status_code == 200 and len(r.content) > 500:
                 return r.content
         except Exception:
             pass
 
     if cam_id in ("realsense", "rs_color"):
-        try:
-            r = requests.get("http://127.0.0.1:5002/realsense_feed", timeout=1.0)
-            if r.status_code == 200:
-                return r.content
-        except Exception:
-            pass
+        frame = _read_mjpeg_frame("http://127.0.0.1:5002/realsense_feed", timeout=1.0)
+        if frame:
+            return frame
 
     if cam_id in ("depth", "rs_depth"):
-        try:
-            r = requests.get("http://127.0.0.1:5002/realsense_depth_feed", timeout=1.0)
-            if r.status_code == 200:
-                return r.content
-        except Exception:
-            pass
+        frame = _read_mjpeg_frame("http://127.0.0.1:5002/realsense_depth_feed", timeout=1.0)
+        if frame:
+            return frame
 
     try:
         return _get(MULTICAM, f"/cameras/{cam_id}/frame").content
