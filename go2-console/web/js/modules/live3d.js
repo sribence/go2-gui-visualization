@@ -1,39 +1,35 @@
 /* Live 3D: point clouds, camera PiP and manual control on one surface.
  *
- * Modelled on what actually worked in the older showcase view: the value is
- * in flipping layers on and off *fast* while watching the robot, so every
- * toggle is one click and one keystroke, and nothing is buried in a menu.
- *
- * The manual bar is deliberately locked by default. The dock currently runs
- * a read-only sensor hub with no movement code path at all, so the controls
- * are shown disabled with the reason spelled out rather than hidden.
+ * Modelled on what actually worked in the older showcase view: official Go2 DAE
+ * mesh rendering, 2D occupancy grid floor map texture, Hesai LiDAR multi-frame
+ * persistence, and fast layer toggles.
  */
 const { api, el, clear, store, fmt, toast } = await import("../core.js" + (window.__V || ""));
 
 let ui = {}, three = null, timer = null;
 let opts = {
-  go2: true, hesai: true, map: true, traj: true, freeze: false, follow: true,
+  go2: true, hesai: true, map: true, traj: true, mapFloor: true, freeze: false, follow: true,
   mapPoints: 60000,
-  view: "tpv",          // tpv | fpv | free
+  view: "tpv",          // tpv | fpv
   zoom: "near",         // near | far
   points: 4000,
   hz: 5,
+  persistSec: 3.5,
 };
 let clouds = { go2: null, hesai: null };
 let slam = { version: -1, total: 0, shown: 0, status: null, busy: false };
 let camSource = "go2";
 let unlocked = false;
+let lastGridVersion = -1;
 
-/* Manual drive state. The sticks and the WASD hint used to be decorative:
- * the posture buttons posted commands but nothing ever sent a velocity, so
- * the robot would stand up on request and then refuse to walk. */
+/* Manual drive state. */
 let drive = { vx: 0, vy: 0, vyaw: 0 };
 let heldKeys = new Set();
 let driveTimer = null;
-let driveActive = false;   // was the last command non-zero
-const DRIVE_HZ = 10;       // mc_motion stops the robot after 0.5s of silence
+let driveActive = false;
+const DRIVE_HZ = 10;
 
-// Names must match mc_motion's /action/<name> endpoint.
+// Names match mc_motion's /action/<name> endpoint.
 const ACTIONS = [
   ["stand_up", "↑ Állj fel"], ["lay_down", "↓ Feküdj"], ["sit", "· Ülj le"],
   ["wave", "👋 Integess"], ["heart", "♥ Szív"],
@@ -41,7 +37,7 @@ const ACTIONS = [
 
 export default {
   id: "live3d", icon: "🛰", short: "Élő 3D",
-  title: "Élő 3D", subtitle: "pontfelhő · kamera · kézi vezérlés", flush: true,
+  title: "Élő 3D", subtitle: "pontfelhő · 3D robottest · élő 2D térkép · kézi vezérlés", flush: true,
 
   mount({ body, tools }) {
     clear(body);
@@ -52,7 +48,7 @@ export default {
     ui.bar = el("div", {
       style: {
         position: "absolute", top: "10px", left: "10px", zIndex: "10",
-        display: "flex", gap: "6px", flexWrap: "wrap", maxWidth: "calc(100% - 330px)",
+        display: "flex", gap: "6px", flexWrap: "wrap", maxWidth: "calc(100% - 340px)",
       },
     });
     ui.bar.append(
@@ -61,7 +57,8 @@ export default {
       zoomBtn("near", "🔍 Közel"), zoomBtn("far", "🔭 Távol"),
       tog("go2", () => `● Go2 LiDAR: ${opts.go2 ? "BE" : "KI"}`, () => opts.go2, "#4db8ff"),
       tog("hesai", () => `● Hesai LiDAR: ${opts.hesai ? "BE" : "KI"}`, () => opts.hesai, "#b07dff"),
-      tog("map", () => `▦ Térkép: ${opts.map ? "BE" : "KI"}`, () => opts.map, "#5ce6a8"),
+      tog("mapFloor", () => `▦ Padló térkép: ${opts.mapFloor ? "BE" : "KI"}`, () => opts.mapFloor, "#5ce6a8"),
+      tog("map", () => `░ SLAM pontok: ${opts.map ? "BE" : "KI"}`, () => opts.map, "#7bffb0"),
       tog("traj", () => `↝ Útvonal: ${opts.traj ? "BE" : "KI"}`, () => opts.traj, "#ffd166"),
       el("button.btn.sm", { id: "l3d-slam", text: "◐ SLAM", onclick: toggleSlam }),
       el("button.btn.sm", { id: "l3d-count", text: "⚙ Hesai pontszám", onclick: cyclePoints }),
@@ -162,13 +159,12 @@ export default {
     window.removeEventListener("keyup", onDriveKey);
     window.removeEventListener("blur", releaseAll);
     clearInterval(driveTimer);
-    // Leaving the module must not leave a velocity latched upstream.
     releaseAll();
     ui.pipImg.removeAttribute("src");
   },
 
   inspector() {
-    const box = el("div.igroup", {}, [el("h4", { text: "Pontfelhő" })]);
+    const box = el("div.igroup", {}, [el("h4", { text: "Pontfelhő és Megjelenítés" })]);
     box.append(
       slider("Pontok / forrás", opts.points, 500, 20000, 500, "pont", (v) => {
         opts.points = v; refreshBar();
@@ -179,16 +175,16 @@ export default {
         timer = setInterval(tick, Math.round(1000 / opts.hz));
       }),
       slider("Pontméret", three?.pointSize ?? 0.035, 0.01, 0.12, 0.005, "m", (v) => three?.setPointSize(v)),
+      slider("Hesai megmaradás", opts.persistSec, 0.5, 10.0, 0.5, "s", (v) => { opts.persistSec = v; }),
     );
-    const slamBox = el("div.igroup", {}, [el("h4", { text: "Térképezés (KISS-ICP)" })]);
+    const slamBox = el("div.igroup", {}, [el("h4", { text: "Térképezés (KISS-ICP & 2D Grid)" })]);
     slamBox.append(
       collapsible("Mi ez?",
-        "Tiszta LiDAR-odometria: a pozíciót a pontfelhők geometriájából "
-        + "számolja, ezért sport mód és lábodometria nélkül is épül a térkép. "
-        + "A finomhangolás a Beállítások → Élő 3D → SLAM alatt van."),
+        "3D LiDAR-odometria és 2D beágyazott Occupancy Grid padló-térkép. "
+        + "A zöld falakat és szabad tereket közvetlenül a robot alatt jeleníti meg."),
       slider("Térkép-pontok", opts.mapPoints, 10000, 300000, 10000, "pont", (v) => {
         opts.mapPoints = v;
-        slam.version = -1;   // force a refetch at the new budget
+        slam.version = -1;
       }),
       slider("Térkép pontméret", 0.03, 0.01, 0.10, 0.005, "m", (v) => three?.setMapPointSize(v)),
       el("div.param", {}, [
@@ -199,7 +195,7 @@ export default {
       el("h4", { text: "Billentyűk" }),
       el("div.param", {}, [el("div.help", {
         style: { borderLeft: "none", paddingLeft: "2px" },
-        text: "1 Go2 · 2 Hesai · 3 Térkép · 4 Útvonal · F Freeze · "
+        text: "1 Go2 · 2 Hesai · 3 Padló térkép · 4 Útvonal · F Freeze · "
             + "T TPV/FPV · R Reset · C követés · WASD/QE vezetés",
       })]),
     ]);
@@ -255,18 +251,21 @@ function refreshBar() {
   b.querySelector('[data-tog="follow"]').textContent = `⌖ Robot követése: ${opts.follow ? "BE" : "KI"}`;
   b.querySelector('[data-tog="go2"]').textContent = `● Go2 LiDAR: ${opts.go2 ? "BE" : "KI"}`;
   b.querySelector('[data-tog="hesai"]').textContent = `● Hesai LiDAR: ${opts.hesai ? "BE" : "KI"}`;
+  b.querySelector('[data-tog="mapFloor"]').textContent = `▦ Padló térkép: ${opts.mapFloor ? "BE" : "KI"}`;
+  b.querySelector('[data-tog="map"]').textContent = `░ SLAM pontok: ${opts.map ? "BE" : "KI"}`;
   b.querySelector('[data-tog="freeze"]').textContent = `❄ Freeze: ${opts.freeze ? "BE" : "KI"}`;
-  b.querySelector('[data-tog="map"]').textContent = `▦ Térkép: ${opts.map ? "BE" : "KI"}`;
   b.querySelector('[data-tog="traj"]').textContent = `↝ Útvonal: ${opts.traj ? "BE" : "KI"}`;
   renderSlamBtn();
   document.getElementById("l3d-count").textContent = `⚙ Pontszám: ${opts.points}`;
-  for (const k of ["follow", "go2", "hesai", "map", "traj", "freeze"]) {
-    b.querySelector(`[data-tog="${k}"]`).classList.toggle("on", !!opts[k]);
+  for (const k of ["follow", "go2", "hesai", "mapFloor", "map", "traj", "freeze"]) {
+    const btn = b.querySelector(`[data-tog="${k}"]`);
+    if (btn) btn.classList.toggle("on", !!opts[k]);
   }
   b.querySelectorAll("[data-view]").forEach((n) => n.classList.toggle("on", n.dataset.view === opts.view));
   b.querySelectorAll("[data-zoom]").forEach((n) => n.classList.toggle("on", n.dataset.zoom === opts.zoom));
   three?.setLayer("go2", opts.go2);
   three?.setLayer("hesai", opts.hesai);
+  three?.setLayer("mapFloor", opts.mapFloor);
   three?.setLayer("map", opts.map);
   three?.setLayer("traj", opts.traj);
   three?.applyView();
@@ -279,7 +278,7 @@ function onKey(e) {
   const k = e.key.toLowerCase();
   if (k === "1") { opts.go2 = !opts.go2; refreshBar(); }
   else if (k === "2") { opts.hesai = !opts.hesai; refreshBar(); }
-  else if (k === "3") { opts.map = !opts.map; refreshBar(); }
+  else if (k === "3") { opts.mapFloor = !opts.mapFloor; refreshBar(); }
   else if (k === "4") { opts.traj = !opts.traj; refreshBar(); }
   else if (k === "f") { opts.freeze = !opts.freeze; refreshBar(); }
   else if (k === "t") { opts.view = opts.view === "tpv" ? "fpv" : "tpv"; refreshBar(); }
@@ -304,14 +303,6 @@ function stick(label) {
   return { node, knob };
 }
 
-/* --- manual drive ------------------------------------------------------
- *
- * mc_motion stops the robot if no command arrives within 0.5 s, so driving
- * is a continuous stream at 10 Hz, not one post per keypress. That watchdog
- * is the reason this has to be a loop: a single command would move the
- * robot for half a second and then stop, which reads as "broken" rather
- * than as the safety feature it is.
- */
 const DRIVE_KEYS = {
   w: ["vx", 1], s: ["vx", -1],
   a: ["vy", 1], d: ["vy", -1],
@@ -344,8 +335,6 @@ function resetKnob(st) {
   if (st?.knob) st.knob.style.transform = "translate(-50%, -50%)";
 }
 
-/* Pointer control for the two knobs. Left stick drives, right stick turns --
- * the same split as the keyboard, so the labels stay honest. */
 function bindStick(st, which) {
   const R = 34;
   let dragging = false;
@@ -391,8 +380,6 @@ function pushDrive() {
     return;
   }
   renderDriveReadout(cmd);
-  // One trailing zero when the operator lets go: the watchdog would stop the
-  // robot anyway, but half a second later.
   if (!moving && !driveActive) return;
   driveActive = moving;
   api.post("/api/manual", cmd).catch((e) => {
@@ -403,9 +390,6 @@ function pushDrive() {
 function renderDriveReadout(cmd) {
   if (!ui.driveOut) return;
   if (!cmd) { ui.driveOut.textContent = ""; return; }
-  // Shows what is actually being sent -- the missing readout is precisely
-  // why "nothing is being sent at all" looked the same as "the robot will
-  // not move".
   const on = Math.abs(cmd.vx) + Math.abs(cmd.vy) + Math.abs(cmd.vyaw) > 0.01;
   ui.driveOut.textContent = on
     ? `▶ küldés  vx ${cmd.vx.toFixed(2)}  vy ${cmd.vy.toFixed(2)}  vyaw ${cmd.vyaw.toFixed(2)}`
@@ -475,22 +459,30 @@ async function tick() {
   if (opts.go2) jobs.push(fetchCloud("go2"));
   if (opts.hesai) jobs.push(fetchCloud("hesai"));
   if (opts.map || opts.traj) jobs.push(fetchMap());
+  if (opts.mapFloor) jobs.push(fetchGridMap());
   await Promise.all(jobs);
   renderStats();
 }
 
-/* The accumulated map can be a hundred thousand points, so it is only
- * refetched when the engine says it actually changed -- and never while a
- * previous fetch is still in flight, which is what would otherwise happen
- * the moment the map outgrows the tick interval. */
+async function fetchGridMap() {
+  const st = store.state;
+  if (st && st.map_version === lastGridVersion && lastGridVersion >= 0) return;
+  try {
+    const d = await api.get("/api/map");
+    if (d && (d.data || d.floor || d.width)) {
+      lastGridVersion = st?.map_version ?? 0;
+      three?.setLiveMapFloor(d);
+    }
+  } catch (e) {
+    /* keep quiet */
+  }
+}
+
 async function fetchMap() {
   if (slam.busy) return;
   const st = store.state?.slam;
   if (st && !st.running && slam.version >= 0) return;
   if (st && st.map_version === slam.version) return;
-  // The map version ticks on every scan, but the map is cumulative: it
-  // never needs the refresh rate of a live cloud, and at a hundred thousand
-  // points that difference is megabytes a second.
   if (Date.now() - (slam.lastFetch || 0) < 1000) return;
   slam.lastFetch = Date.now();
   slam.busy = true;
@@ -556,10 +548,6 @@ async function fetchCloud(src) {
 
 function onState(s) {
   three?.setRobot(s.pose, opts);
-  // The map lives in world coordinates while the scene is robot-centric, so
-  // a pose is what places one inside the other -- and it has to be the SLAM
-  // pose specifically, because that is the frame the map was built in. The
-  // robot's own sportmode pose is a different origin entirely.
   three?.setWorldPose(s.slam?.pose || null);
   renderSlamBtn();
   renderLock();
@@ -573,31 +561,21 @@ function renderStats(s) {
   const rows = [
     ["Go2 LiDAR", opts.go2 ? `${clouds.go2?.count ?? 0} / ${clouds.go2?.raw_count ?? 0}` : "KI"],
     ["Hesai", opts.hesai ? `${clouds.hesai?.count ?? 0} / ${clouds.hesai?.raw_count ?? 0}` : "KI"],
-    ["Térkép", opts.map ? `${slam.shown} / ${slam.total} voxel` : "KI"],
-    ["SLAM", s.slam?.available === false ? "n/a"
-             : s.slam?.running ? `${s.slam.fps ?? 0} Hz · ${s.slam.frames ?? 0} kép · ${s.slam.last_ms ?? 0} ms`
-             : "áll"],
+    ["Padló 2D térkép", opts.mapFloor ? (lastGridVersion >= 0 ? "aktív" : "betöltés") : "KI"],
+    ["SLAM 3D", opts.map ? `${slam.shown} / ${slam.total} voxel` : "KI"],
+    ["SLAM állapot", s.slam?.available === false ? "n/a"
+                     : s.slam?.running ? `${s.slam.fps ?? 0} Hz · ${s.slam.frames ?? 0} kép`
+                     : "áll"],
     ["Pozíció", s.pose ? `${fmt.n(s.pose.x)}, ${fmt.n(s.pose.y)}` : "n/a"],
-    ["Pozíció forrása", s.pose_source === "kiss-icp" ? "KISS-ICP (LiDAR)"
-                        : s.pose_source === "robot" ? "robot (sport mód)" : "nincs"],
     ["Irány", s.imu ? fmt.deg(s.imu.yaw) : "--"],
     ["Akku", s.battery?.percent != null ? `${s.battery.percent} %` : "--"],
-    ["Motor max", s.max_motor_temp != null ? `${s.max_motor_temp} °C` : "n/a"],
   ];
   clear(box);
   for (const [k, v] of rows) {
     box.appendChild(el("div.kv", {}, [el("span.k", { text: k }), el("span.v", { text: String(v) })]));
   }
-  if (!s.pose && s.pose_unavailable_reason) {
-    box.appendChild(el("div", {
-      text: s.pose_unavailable_reason,
-      style: { fontSize: "10px", color: "var(--warn)", marginTop: "6px", maxWidth: "200px", lineHeight: "1.3" },
-    }));
-  }
 }
 
-/* Same compact row as the generated inspector: label, slider and a typable
- * value on one line. */
 function slider(label, value, min, max, step, unit, onChange) {
   const dec = step < 1 ? (String(step).split(".")[1]?.length || 2) : 0;
   const txt = (v) => Number(v).toFixed(dec);
@@ -623,46 +601,232 @@ function slider(label, value, min, max, step, unit, onChange) {
 }
 
 // ---------------------------------------------------------------------------
-// three.js scene
+// three.js scene with DAE mesh avatar & 2D Occupancy Grid floor plane
 // ---------------------------------------------------------------------------
 function makeScene(host) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x05070b);
   scene.fog = new THREE.Fog(0x05070b, 18, 42);
 
-  const camera = new THREE.PerspectiveCamera(58, 1, 0.05, 400);
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  const camera = new THREE.PerspectiveCamera(50, 1, 0.05, 400);
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   host.appendChild(renderer.domElement);
 
   const grid = new THREE.GridHelper(24, 24, 0x1d3348, 0x121e2c);
   scene.add(grid);
-  scene.add(new THREE.AmbientLight(0xffffff, 0.7));
 
-  // Robot body: the point clouds arrive in the robot frame, so the body sits
-  // at the origin and the world moves around it.
-  const robot = new THREE.Group();
-  const body = new THREE.Mesh(
-    new THREE.BoxGeometry(0.62, 0.2, 0.31),
-    new THREE.MeshStandardMaterial({ color: 0x2c3a4c, emissive: 0x0d1c28 }));
-  const nose = new THREE.Mesh(
-    new THREE.ConeGeometry(0.08, 0.22, 10),
-    new THREE.MeshBasicMaterial({ color: 0x4db8ff }));
-  nose.rotation.z = -Math.PI / 2;
-  nose.position.set(0.42, 0, 0);
-  robot.add(body, nose);
-  scene.add(robot);
+  scene.add(new THREE.AmbientLight(0x557788, 1.2));
+  const keyLight = new THREE.DirectionalLight(0x22e5ff, 1.4);
+  keyLight.position.set(1, 2, 1);
+  scene.add(keyLight);
+  const rimLight = new THREE.DirectionalLight(0x7bffb0, 0.6);
+  rimLight.position.set(-1, 1, -1);
+  scene.add(rimLight);
 
-  // --- world group -------------------------------------------------
-  // The live scans arrive in the robot frame and the robot sits at the
-  // origin, but the SLAM map is in world coordinates. Rather than
-  // transforming a hundred thousand points on the CPU every frame, the map
-  // is uploaded once in world coordinates and this group carries the
-  // inverse robot pose, so the GPU does the work.
-  //
-  // The two frames also differ in convention: the robot is z-up, three.js
-  // is y-up. SWAP is that fixed change of basis, and the group transform is
-  // SWAP * pose⁻¹ * SWAP⁻¹ so it applies to points already stored swapped.
+  // --- Robot avatar group -------------------------------------------
+  const BODY = { x: 0.3762, y: 0.114, z: 0.0935 };
+  const THIGH_LEN = 0.213, CALF_LEN = 0.213;
+  const LEGS = [
+    { name: "FR", x:  0.1934, z: -0.0465, thighZ: -0.0955 },
+    { name: "FL", x:  0.1934, z:  0.0465, thighZ:  0.0955 },
+    { name: "RR", x: -0.1934, z: -0.0465, thighZ: -0.0955 },
+    { name: "RL", x: -0.1934, z:  0.0465, thighZ:  0.0955 },
+  ];
+
+  const robotGroup = new THREE.Group();
+  robotGroup.position.y = THIGH_LEN + CALF_LEN * 0.55;
+  scene.add(robotGroup);
+
+  // Materials
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x263340, emissive: 0x0a1218, metalness: 0.6, roughness: 0.3 });
+  const accentMat = new THREE.MeshStandardMaterial({ color: 0x22e5ff, emissive: 0x0a3540, metalness: 0.4, roughness: 0.35 });
+  const jointMat = new THREE.MeshStandardMaterial({ color: 0x7bffb0, emissive: 0x114422, metalness: 0.5, roughness: 0.3 });
+
+  // Fallback procedural box
+  const proceduralBody = new THREE.Mesh(new THREE.BoxGeometry(BODY.x, BODY.y, BODY.z), bodyMat);
+  robotGroup.add(proceduralBody);
+
+  function makeTextSprite(text, color) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 128; canvas.height = 48;
+    const ctx = canvas.getContext("2d");
+    ctx.font = "bold 28px monospace";
+    ctx.fillStyle = color;
+    ctx.textAlign = "center";
+    ctx.fillText(text, 64, 34);
+    const tex = new THREE.CanvasTexture(canvas);
+    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
+    const sprite = new THREE.Sprite(mat);
+    sprite.scale.set(0.25, 0.09, 1);
+    return sprite;
+  }
+
+  const frontLabel = makeTextSprite("ELÜL", "#22e5ff");
+  frontLabel.position.set(BODY.x / 2 + 0.14, 0.06, 0);
+  robotGroup.add(frontLabel);
+
+  const frontArrow = new THREE.Mesh(
+    new THREE.ConeGeometry(0.025, 0.07, 12),
+    new THREE.MeshStandardMaterial({ color: 0x22e5ff, emissive: 0x0a3540 })
+  );
+  frontArrow.position.set(BODY.x / 2 + 0.03, 0, 0);
+  frontArrow.rotation.z = -Math.PI / 2;
+  robotGroup.add(frontArrow);
+
+  const legPivots = [];
+  for (const leg of LEGS) {
+    const hipPivot = new THREE.Group();
+    hipPivot.position.set(leg.x, 0, leg.z);
+    robotGroup.add(hipPivot);
+
+    const hipMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.05, 16), jointMat);
+    hipMesh.rotation.z = Math.PI / 2;
+    hipPivot.add(hipMesh);
+
+    const legLabel = makeTextSprite(leg.name, "#7bffb0");
+    legLabel.position.set(leg.x, 0.09, leg.z * 1.6);
+    robotGroup.add(legLabel);
+
+    const thighPivot = new THREE.Group();
+    thighPivot.position.set(0, 0, leg.thighZ);
+    hipPivot.add(thighPivot);
+
+    const thighMesh = new THREE.Mesh(new THREE.BoxGeometry(0.032, THIGH_LEN, 0.032), accentMat);
+    thighMesh.position.set(0, -THIGH_LEN / 2, 0);
+    thighPivot.add(thighMesh);
+
+    const calfPivot = new THREE.Group();
+    calfPivot.position.set(0, -THIGH_LEN, 0);
+    thighPivot.add(calfPivot);
+
+    const calfMesh = new THREE.Mesh(new THREE.BoxGeometry(0.024, CALF_LEN, 0.024), bodyMat);
+    calfMesh.position.set(0, -CALF_LEN / 2, 0);
+    calfPivot.add(calfMesh);
+
+    const footMesh = new THREE.Mesh(new THREE.SphereGeometry(0.022, 12, 12), jointMat);
+    footMesh.position.set(0, -CALF_LEN, 0);
+    calfPivot.add(footMesh);
+
+    legPivots.push({ hip: hipPivot, thigh: thighPivot, calf: calfPivot, foot: footMesh });
+  }
+
+  // Attempt DAE mesh loading
+  if (window.THREE && window.THREE.ColladaLoader) {
+    const REAL_MESH_BASE = "/static/go2_description/meshes/";
+    const daeLoader = new THREE.ColladaLoader();
+    const loadDae = (name) => new Promise((resolve, reject) => {
+      daeLoader.load(REAL_MESH_BASE + name, (c) => resolve(c.scene), undefined, reject);
+    });
+    const preparePart = (sc, material) => {
+      const wrap = new THREE.Group();
+      sc.traverse((child) => {
+        if (child.isMesh) {
+          child.material = material;
+          child.material.side = THREE.DoubleSide;
+        }
+      });
+      wrap.add(sc);
+      return wrap;
+    };
+    const HIP_EULER = { FR: [Math.PI, 0, 0], FL: [0, 0, 0], RR: [Math.PI, Math.PI, 0], RL: [0, Math.PI, 0] };
+
+    Promise.all([
+      loadDae("base.dae"), loadDae("hip.dae"),
+      loadDae("thigh.dae"), loadDae("thigh_mirror.dae"),
+      loadDae("calf.dae"), loadDae("calf_mirror.dae"),
+      loadDae("foot.dae"),
+    ]).then(([baseTpl, hipTpl, thighTpl, thighMirrorTpl, calfTpl, calfMirrorTpl, footTpl]) => {
+      proceduralBody.visible = false;
+      const realBody = preparePart(baseTpl, bodyMat);
+      robotGroup.add(realBody);
+
+      LEGS.forEach((leg, i) => {
+        const lp = legPivots[i];
+        const isRight = leg.name[1] === "R";
+
+        lp.hip.children.find((c) => c.isMesh).visible = false;
+        const realHip = preparePart(hipTpl.clone(true), jointMat.clone());
+        const e = HIP_EULER[leg.name];
+        realHip.rotation.set(e[0], e[1], e[2]);
+        lp.hip.add(realHip);
+
+        const procThigh = lp.thigh.children.find((c) => c.isMesh);
+        if (procThigh) procThigh.visible = false;
+        const realThigh = preparePart((isRight ? thighMirrorTpl : thighTpl).clone(true), accentMat);
+        lp.thigh.add(realThigh);
+
+        const procCalf = lp.calf.children.find((c) => c.isMesh);
+        if (procCalf) procCalf.visible = false;
+        const realCalf = preparePart((isRight ? calfMirrorTpl : calfTpl).clone(true), bodyMat);
+        lp.calf.add(realCalf);
+
+        lp.foot.visible = false;
+        const realFoot = preparePart(footTpl.clone(true), jointMat.clone());
+        realFoot.position.copy(lp.foot.position);
+        lp.foot.parent.add(realFoot);
+      });
+    }).catch(() => {
+      /* procedural fallback remains visible */
+    });
+  }
+
+  // --- Live 2D Occupancy Grid Ground Plane ---
+  const liveMapFloorGeom = new THREE.PlaneGeometry(1, 1);
+  const liveMapFloorMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.82, side: THREE.DoubleSide, depthWrite: false });
+  const liveMapFloorMesh = new THREE.Mesh(liveMapFloorGeom, liveMapFloorMat);
+  liveMapFloorMesh.rotation.x = -Math.PI / 2;
+  liveMapFloorMesh.position.y = -0.02;
+  liveMapFloorMesh.visible = false;
+  liveMapFloorMesh.renderOrder = -1;
+  scene.add(liveMapFloorMesh);
+
+  function updateLiveMapFloor(d) {
+    if (!d) { liveMapFloorMesh.visible = false; return; }
+    const W = d.width, H = d.height;
+    const data = d.data || d.floor;
+    if (!W || !H || !data) { liveMapFloorMesh.visible = false; return; }
+
+    const off = document.createElement("canvas");
+    off.width = W; off.height = H;
+    const octx = off.getContext("2d");
+    const img = octx.createImageData(W, H);
+    for (let i = 0; i < data.length; i++) {
+      const v = data[i];
+      let r, g, b, a;
+      if (v < 0) { r = 18; g = 22; b = 30; a = 60; }
+      else if (v < 50) { r = 20; g = 40; b = 50; a = 90; }
+      else { r = 123; g = 255; b = 176; a = 230; } // green walls
+      const row = H - 1 - Math.floor(i / W);
+      const col = i % W;
+      const p = (row * W + col) * 4;
+      img.data[p] = r; img.data[p + 1] = g; img.data[p + 2] = b; img.data[p + 3] = a;
+    }
+    octx.putImageData(img, 0, 0);
+
+    if (liveMapFloorMat.map) liveMapFloorMat.map.dispose();
+    const tex = new THREE.CanvasTexture(off);
+    tex.magFilter = THREE.NearestFilter;
+    tex.minFilter = THREE.NearestFilter;
+    liveMapFloorMat.map = tex;
+    liveMapFloorMat.needsUpdate = true;
+
+    const res = d.resolution || 0.05;
+    const widthM = W * res, heightM = H * res;
+    if (!liveMapFloorMesh.userData.sized || liveMapFloorMesh.userData.w !== widthM || liveMapFloorMesh.userData.h !== heightM) {
+      liveMapFloorGeom.dispose();
+      liveMapFloorMesh.geometry = new THREE.PlaneGeometry(widthM, heightM);
+      liveMapFloorMesh.userData.sized = true;
+      liveMapFloorMesh.userData.w = widthM;
+      liveMapFloorMesh.userData.h = heightM;
+    }
+    const ox = d.origin_x || 0, oy = d.origin_y || 0;
+    liveMapFloorMesh.position.x = ox + widthM / 2;
+    liveMapFloorMesh.position.z = -(oy + heightM / 2);
+    liveMapFloorMesh.visible = opts.mapFloor !== false;
+  }
+
+  // --- World group (SLAM & Trajectory) -------------------------------
   const SWAP = new THREE.Matrix4().set(
     1, 0, 0, 0,
     0, 0, 1, 0,
@@ -679,19 +843,17 @@ function makeScene(host) {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(0), 3));
     geo.setAttribute("color", new THREE.BufferAttribute(new Float32Array(0), 3));
-    const mat = new THREE.PointsMaterial({ size: pointSize, vertexColors: true, sizeAttenuation: true });
+    const mat = new THREE.PointsMaterial({ size: pointSize, transparent: true, opacity: 0.82, vertexColors: true, sizeAttenuation: true, depthTest: false });
     const pts = new THREE.Points(geo, mat);
+    pts.renderOrder = 999;
     pts.frustumCulled = false;
     scene.add(pts);
     layers[name] = { pts, mat, hueBase };
     return layers[name];
   }
-  makeLayer("go2", 0.55);      // cyan-blue end
-  makeLayer("hesai", 0.08);    // amber-orange end
+  makeLayer("go2", 0.55);      // cyan/blue
+  makeLayer("hesai", 0.08);    // amber/purple
 
-  // The accumulated map, in the world group. Its own colour family (green)
-  // so a glance separates "what the robot sees now" from "what it has
-  // mapped", which is the whole point of having both on screen.
   const mapGeo = new THREE.BufferGeometry();
   mapGeo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(0), 3));
   mapGeo.setAttribute("color", new THREE.BufferAttribute(new Float32Array(0), 3));
@@ -706,67 +868,160 @@ function makeScene(host) {
   trajLine.frustumCulled = false;
   world.add(trajLine);
   layers.traj = { pts: trajLine, mat: trajMat };
+  layers.mapFloor = { pts: liveMapFloorMesh };
 
-  let dist = 4.2, az = -Math.PI * 0.75, pol = Math.PI * 0.33;
-  const DEFAULTS = { dist: 4.2, az: -Math.PI * 0.75, pol: Math.PI * 0.33 };
+  // Hesai persistence buffer
+  let hesaiFrames = [];
+  const HESAI_MAX_FRAMES = 15;
+
+  // Camera Orbit & Tracking
+  const CAM_TARGET = new THREE.Vector3(0, 0.16, 0);
+  let camAngle = 0.7, camPolar = 1.15, camRadius = 1.6;
+  const FPV_LOCAL_POS = new THREE.Vector3(-0.02, 0.16, 0);
+  const FPV_LOCAL_LOOKAT = new THREE.Vector3(1.0, 0.05, 0);
 
   function place() {
     if (opts.view === "fpv") {
-      // Just above and behind the head, looking along the heading.
-      camera.position.set(0.34, 0.30, 0);
-      camera.lookAt(8, 0.05, 0);
-      return;
+      robotGroup.add(camera);
+      camera.position.copy(FPV_LOCAL_POS);
+      const targetWorld = robotGroup.localToWorld(FPV_LOCAL_LOOKAT.clone());
+      camera.lookAt(targetWorld);
+    } else {
+      scene.add(camera);
+      if (opts.follow) {
+        CAM_TARGET.x = robotGroup.position.x;
+        CAM_TARGET.z = robotGroup.position.z;
+      }
+      camera.position.set(
+        CAM_TARGET.x + camRadius * Math.sin(camPolar) * Math.cos(camAngle),
+        CAM_TARGET.y + camRadius * Math.cos(camPolar),
+        CAM_TARGET.z + camRadius * Math.sin(camPolar) * Math.sin(camAngle)
+      );
+      camera.lookAt(CAM_TARGET);
     }
-    camera.position.set(
-      dist * Math.sin(pol) * Math.cos(az),
-      dist * Math.cos(pol),
-      dist * Math.sin(pol) * Math.sin(az));
-    camera.lookAt(0, 0.15, 0);
   }
 
-  let drag = false, last = null;
+  let dragging = false, lastX = 0, lastY = 0, dragMode = "orbit";
+  renderer.domElement.addEventListener("contextmenu", (e) => e.preventDefault());
   renderer.domElement.addEventListener("pointerdown", (e) => {
-    drag = true; last = [e.clientX, e.clientY];
+    dragging = true; lastX = e.clientX; lastY = e.clientY;
+    dragMode = (e.button === 2 || e.button === 1 || e.shiftKey) ? "pan" : "orbit";
     renderer.domElement.setPointerCapture(e.pointerId);
   });
-  renderer.domElement.addEventListener("pointerup", () => { drag = false; });
+  renderer.domElement.addEventListener("pointerup", () => { dragging = false; });
   renderer.domElement.addEventListener("pointermove", (e) => {
-    if (!drag || opts.view === "fpv") return;
-    az -= (e.clientX - last[0]) * 0.006;
-    pol = Math.max(0.08, Math.min(Math.PI / 2 - 0.03, pol - (e.clientY - last[1]) * 0.006));
-    last = [e.clientX, e.clientY];
+    if (!dragging || opts.view === "fpv") return;
+    const dx = e.clientX - lastX, dy = e.clientY - lastY;
+    lastX = e.clientX; lastY = e.clientY;
+    if (dragMode === "pan") {
+      const factor = 0.0025 * camRadius;
+      const sinA = Math.sin(camAngle), cosA = Math.cos(camAngle);
+      CAM_TARGET.x += (sinA * dx + cosA * dy) * factor;
+      CAM_TARGET.z += (-cosA * dx + sinA * dy) * factor;
+      opts.follow = false;
+      refreshBar();
+    } else {
+      camAngle -= dx * 0.006;
+      camPolar = Math.max(0.15, Math.min(Math.PI - 0.15, camPolar - dy * 0.006));
+    }
     place();
   });
   renderer.domElement.addEventListener("wheel", (e) => {
     e.preventDefault();
-    dist = Math.max(0.8, Math.min(60, dist * (e.deltaY > 0 ? 1.12 : 0.89)));
+    camRadius = Math.max(0.5, Math.min(30, camRadius + e.deltaY * 0.0025 * camRadius));
     place();
   }, { passive: false });
 
-  (function loop() { requestAnimationFrame(loop); renderer.render(scene, camera); })();
-  place();
+  (function loop() {
+    requestAnimationFrame(loop);
+    place();
+    renderer.render(scene, camera);
+  })();
+
+  function applyMotorQ(q) {
+    if (!q || q.length < 12) return;
+    LEGS.forEach((leg, i) => {
+      const base = i * 3;
+      if (legPivots[i]) {
+        legPivots[i].hip.rotation.x = q[base + 0];
+        legPivots[i].thigh.rotation.z = -q[base + 1];
+        legPivots[i].calf.rotation.z = -q[base + 2];
+      }
+    });
+  }
 
   return {
     get pointSize() { return pointSize; },
     setPointSize(v) {
       pointSize = v;
       for (const [name, l] of Object.entries(layers)) {
-        if (name !== "map" && name !== "traj") l.mat.size = v;
+        if (name !== "map" && name !== "traj" && l.mat) l.mat.size = v;
       }
     },
-    setLayer(name, on) { if (layers[name]) layers[name].pts.visible = on; },
+    setLayer(name, on) {
+      if (layers[name]) {
+        const target = layers[name].pts;
+        if (target) target.visible = on;
+      }
+    },
+    setLiveMapFloor(d) { updateLiveMapFloor(d); },
     setCloud(name, points) {
       const l = layers[name];
       if (!l) return;
+      const now = performance.now();
+
+      if (name === "hesai") {
+        // Hesai Multi-frame Persistence
+        const n = points.length;
+        const framePos = new Float32Array(n * 3);
+        for (let i = 0; i < n; i++) {
+          const [x, y, z] = points[i];
+          framePos[i * 3 + 0] = x;
+          framePos[i * 3 + 1] = z;
+          framePos[i * 3 + 2] = -y;
+        }
+        hesaiFrames.push({ positions: framePos, count: n, timestamp: now });
+        const persistMs = (opts.persistSec || 3.5) * 1000;
+        while (hesaiFrames.length > 1 && (now - hesaiFrames[0].timestamp > persistMs)) {
+          hesaiFrames.shift();
+        }
+        if (hesaiFrames.length > HESAI_MAX_FRAMES) hesaiFrames.splice(0, hesaiFrames.length - HESAI_MAX_FRAMES);
+
+        let total = 0;
+        for (let i = 0; i < hesaiFrames.length; i++) total += hesaiFrames[i].count;
+        const mergedPos = new Float32Array(total * 3);
+        const mergedCol = new Float32Array(total * 3);
+        const c = new THREE.Color();
+        let offset = 0;
+        for (let i = 0; i < hesaiFrames.length; i++) {
+          mergedPos.set(hesaiFrames[i].positions, offset);
+          const fCount = hesaiFrames[i].count;
+          for (let j = 0; j < fCount; j++) {
+            const zVal = hesaiFrames[i].positions[j * 3 + 1];
+            const t = Math.max(0, Math.min(1, (zVal + 0.5) / 2.4));
+            c.setHSL(0.08 - t * 0.12, 0.9, 0.4 + t * 0.3);
+            const pIdx = (offset / 3) + j;
+            mergedCol[pIdx * 3 + 0] = c.r; mergedCol[pIdx * 3 + 1] = c.g; mergedCol[pIdx * 3 + 2] = c.b;
+          }
+          offset += hesaiFrames[i].positions.length;
+        }
+        l.pts.geometry.dispose();
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute("position", new THREE.BufferAttribute(mergedPos, 3));
+        geo.setAttribute("color", new THREE.BufferAttribute(mergedCol, 3));
+        l.pts.geometry = geo;
+        l.pts.frustumCulled = false;
+        return;
+      }
+
+      // Go2 or standard cloud
       const n = points.length;
       const pos = new Float32Array(n * 3);
       const col = new Float32Array(n * 3);
       const c = new THREE.Color();
       for (let i = 0; i < n; i++) {
         const [x, y, z] = points[i];
-        // three.js is y-up; the robot frame is z-up.
         pos[i * 3] = x; pos[i * 3 + 1] = z; pos[i * 3 + 2] = -y;
-        // Height ramp, so structure reads without any lighting.
         const t = Math.max(0, Math.min(1, (z + 0.5) / 2.4));
         c.setHSL(l.hueBase - t * 0.12, 0.85, 0.35 + t * 0.35);
         col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
@@ -815,9 +1070,6 @@ function makeScene(host) {
       if (!pose) { world.visible = false; return; }
       world.visible = true;
       const { x, y, z, roll = 0, pitch = 0, yaw = 0 } = pose;
-      // R = Rz(yaw) * Ry(pitch) * Rx(roll), built explicitly: the Euler
-      // order conventions of three.js and ROS do not agree, and a silently
-      // wrong order would tilt the whole map.
       const cr = Math.cos(roll), sr = Math.sin(roll);
       const cp = Math.cos(pitch), sp = Math.sin(pitch);
       const cy = Math.cos(yaw), sy = Math.sin(yaw);
@@ -834,14 +1086,13 @@ function makeScene(host) {
       world.matrixWorldNeedsUpdate = true;
     },
     setRobot(pose) {
-      // Clouds are robot-relative, so the body stays at the origin; only the
-      // roll/pitch read-out tilts it, which is what an operator expects to see.
       const s = store.state || {};
-      if (s.imu) { robot.rotation.z = -(s.imu.pitch || 0); robot.rotation.x = s.imu.roll || 0; }
+      if (s.imu) { robotGroup.rotation.z = -(s.imu.pitch || 0); robotGroup.rotation.x = s.imu.roll || 0; }
+      if (s.motor_q) applyMotorQ(s.motor_q);
     },
     applyView() { place(); },
-    applyZoom(z) { dist = z === "near" ? 2.6 : 11; place(); },
-    resetView() { dist = DEFAULTS.dist; az = DEFAULTS.az; pol = DEFAULTS.pol; place(); },
+    applyZoom(z) { camRadius = z === "near" ? 1.6 : 6.0; place(); },
+    resetView() { camRadius = 1.6; camAngle = 0.7; camPolar = 1.15; CAM_TARGET.set(0, 0.16, 0); place(); },
     resize() {
       const r = host.getBoundingClientRect();
       renderer.setSize(r.width, r.height);
