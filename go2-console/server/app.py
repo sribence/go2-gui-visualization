@@ -216,7 +216,7 @@ def get_map():
         pass
 
     try:
-        r = requests.get("http://127.0.0.1:5002/live_map_data", timeout=1.5, headers={"Accept": "text/event-stream"})
+        r = requests.get("http://127.0.0.1:5002/live_map_data", timeout=1.5, headers={"Accept": "text/event-stream"}, stream=True)
         if r.status_code == 200:
             for line in r.iter_lines():
                 line_str = line.decode("utf-8") if isinstance(line, bytes) else line
