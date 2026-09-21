@@ -577,50 +577,6 @@ class LiveRobot:
 robot = LiveRobot()
 
 
-def lidar_cloud(source: str, limit: int = 6000) -> dict:
-    pts = []
-    try:
-        if source == "go2":
-            for url in ("http://127.0.0.1:5002/lidar_proxy", "http://127.0.0.1:5001/lidar"):
-                try:
-                    r = _sess().get(url, timeout=1.5)
-                    if r.status_code == 200:
-                        data = r.json()
-                        if isinstance(data, list):
-                            pts = data
-                            break
-                        elif isinstance(data, dict) and "points" in data and isinstance(data["points"], list):
-                            pts = data["points"]
-                            break
-                except Exception:
-                    continue
-        elif source == "hesai":
-            for url in (f"http://127.0.0.1:5002/lidar_hesai_proxy?limit={limit}", f"http://127.0.0.1:5003/lidar?limit={limit}"):
-                try:
-                    r = _sess().get(url, timeout=1.5)
-                    if r.status_code == 200:
-                        data = r.json()
-                        if isinstance(data, list):
-                            pts = data
-                            break
-                        elif isinstance(data, dict) and "points" in data and isinstance(data["points"], list):
-                            pts = data["points"]
-                            break
-                except Exception:
-                    continue
-    except Exception as exc:
-        log("warn", "lidar", f"lidar_cloud hiba ({source}): {exc}")
-
-    return {
-        "source": source,
-        "points": pts[:limit] if pts else [],
-        "count": min(len(pts), limit) if pts else 0,
-        "raw_count": len(pts) if pts else 0,
-        "error": None if pts else "nincs elérhető pontfelhő",
-        "t": _now()
-    }
-
-
 # ---------------------------------------------------------------------------
 # SLAM -- KISS-ICP pure LiDAR odometry, run here on the PC
 # ---------------------------------------------------------------------------
@@ -800,13 +756,50 @@ def _render_lidar(quality: int) -> bytes:
 
 
 def lidar_cloud(source: str, limit: int = 6000) -> dict:
-    """Point cloud passthrough for the 3D viewer. The hub decimates on the
-    dock, so the wire carries thousands of points rather than half a megabyte."""
+    """Point cloud passthrough for the 3D viewer. First queries web_dashboard
+    and standalone sensor bridges (hesai_bridge :5003 / webrtc_bridge :5001),
+    falling back to core."""
+    pts = []
     try:
-        return _get(CORE, f"/lidar/{source}", params={"max": limit}).json()
+        if source == "go2":
+            for url in ("http://127.0.0.1:5002/lidar_proxy", "http://127.0.0.1:5001/lidar", f"{CORE}/lidar/go2"):
+                try:
+                    r = _sess().get(url, timeout=1.5)
+                    if r.status_code == 200:
+                        data = r.json()
+                        if isinstance(data, list):
+                            pts = data
+                            break
+                        elif isinstance(data, dict) and "points" in data and isinstance(data["points"], list):
+                            pts = data["points"]
+                            break
+                except Exception:
+                    continue
+        elif source == "hesai":
+            for url in (f"http://127.0.0.1:5002/lidar_hesai_proxy?limit={limit}", f"http://127.0.0.1:5003/lidar?limit={limit}", f"{CORE}/lidar/hesai"):
+                try:
+                    r = _sess().get(url, timeout=1.5)
+                    if r.status_code == 200:
+                        data = r.json()
+                        if isinstance(data, list):
+                            pts = data
+                            break
+                        elif isinstance(data, dict) and "points" in data and isinstance(data["points"], list):
+                            pts = data["points"]
+                            break
+                except Exception:
+                    continue
     except Exception as exc:
-        return {"source": source, "points": [], "count": 0, "raw_count": 0,
-                "error": _detail(exc)}
+        log("warn", "lidar", f"lidar_cloud hiba ({source}): {exc}")
+
+    return {
+        "source": source,
+        "points": pts[:limit] if pts else [],
+        "count": min(len(pts), limit) if pts else 0,
+        "raw_count": len(pts) if pts else 0,
+        "error": None if pts else "nincs elérhető pontfelhő",
+        "t": _now()
+    }
 
 
 def camera_list() -> list:
