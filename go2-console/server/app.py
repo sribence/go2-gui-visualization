@@ -185,21 +185,25 @@ async def obstacle_avoid(request: Request):
 def get_led():
     if hasattr(demo.robot, "get_led"):
         return demo.robot.get_led()
-    return {"r": 0, "g": 0, "b": 0}
+    return {"switch": 0, "brightness": 0}
 
 
 @app.post("/api/led")
 async def set_led(request: Request):
     body = await request.json()
-    r = int(body.get("r", 0))
-    g = int(body.get("g", 0))
-    b = int(body.get("b", 0))
+    switch = body.get("switch")
+    brightness = body.get("brightness")
+    if switch is None and brightness is None and any(k in body for k in ("r", "g", "b")):
+        max_c = max(int(body.get("r", 0)), int(body.get("g", 0)), int(body.get("b", 0)))
+        brightness = max(0, min(10, int(round((max_c / 255.0) * 10))))
+        switch = 1 if brightness > 0 else 0
+
     if hasattr(demo.robot, "set_led"):
-        ok, err = demo.robot.set_led(r, g, b)
+        ok, err = demo.robot.set_led(switch=switch, brightness=brightness)
         if not ok:
-            status_code = 503 if ("503" in str(err) or "voice" in str(err).lower()) else 409
+            status_code = 503 if ("503" in str(err) or "vui" in str(err).lower()) else 409
             raise HTTPException(status_code=status_code, detail=err)
-    return {"ok": True, "r": r, "g": g, "b": b}
+    return {"ok": True, "switch": switch, "brightness": brightness}
 
 
 @app.get("/api/led/presets")
@@ -214,7 +218,7 @@ async def set_led_preset(name: str):
     if hasattr(demo.robot, "set_led_preset"):
         ok, err = demo.robot.set_led_preset(name)
         if not ok:
-            status_code = 503 if ("503" in str(err) or "voice" in str(err).lower()) else 409
+            status_code = 503 if ("503" in str(err) or "vui" in str(err).lower()) else 409
             raise HTTPException(status_code=status_code, detail=err)
     return {"ok": True, "preset": name}
 

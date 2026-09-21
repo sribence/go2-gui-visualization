@@ -238,29 +238,26 @@ class DemoRobot:
 
     def get_led(self):
         with self.lock:
-            led = getattr(self, "led", {"r": 0, "g": 0, "b": 0})
-            return {"r": led["r"], "g": led["g"], "b": led["b"], "audio_error": None}
+            led = getattr(self, "led", {"switch": 0, "brightness": 0})
+            return {"switch": led.get("switch", 0), "brightness": led.get("brightness", 0), "vui_error": None}
 
-    def set_led(self, r: int, g: int, b: int):
+    def set_led(self, switch: Optional[int] = None, brightness: Optional[int] = None):
         with self.lock:
-            self.led = {"r": max(0, min(255, int(r))), "g": max(0, min(255, int(g))), "b": max(0, min(255, int(b)))}
-        log("info", "core", f"LED szín beállítva: RGB({r},{g},{b})")
+            led = getattr(self, "led", {"switch": 0, "brightness": 0})
+            if switch is not None:
+                led["switch"] = int(switch)
+            if brightness is not None:
+                led["brightness"] = int(brightness)
+            self.led = led
+        log("info", "core", f"LED beállítva: switch={led.get('switch')} brightness={led.get('brightness')}")
         return True, None
 
     def get_led_presets(self):
         return {
-            "off": {"r": 0, "g": 0, "b": 0},
-            "white": {"r": 255, "g": 255, "b": 255},
-            "red": {"r": 255, "g": 0, "b": 0},
-            "green": {"r": 0, "g": 255, "b": 0},
-            "blue": {"r": 0, "g": 0, "b": 255},
-            "yellow": {"r": 255, "g": 255, "b": 0},
-            "cyan": {"r": 0, "g": 255, "b": 255},
-            "magenta": {"r": 255, "g": 0, "b": 255},
-            "orange": {"r": 255, "g": 128, "b": 0},
-            "purple": {"r": 128, "g": 0, "b": 255},
-            "pink": {"r": 255, "g": 105, "b": 180},
-            "warm_white": {"r": 255, "g": 200, "b": 120},
+            "off": {"switch": 0},
+            "on": {"switch": 1, "brightness": 10},
+            "dim": {"switch": 1, "brightness": 3},
+            "bright": {"switch": 1, "brightness": 10},
         }
 
     def set_led_preset(self, name: str):
@@ -268,7 +265,7 @@ class DemoRobot:
         if name not in presets:
             return False, f"ismeretlen preset: {name}"
         p = presets[name]
-        return self.set_led(p["r"], p["g"], p["b"])
+        return self.set_led(p.get("switch"), p.get("brightness"))
 
     def goto(self, x, y):
         with self.lock:

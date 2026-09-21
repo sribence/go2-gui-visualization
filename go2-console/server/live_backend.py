@@ -395,42 +395,41 @@ class LiveRobot:
 
     def get_led(self):
         if not MOTION:
-            return {"r": 0, "g": 0, "b": 0, "error": "nincs mozgás-szolgáltatás bekötve"}
+            return {"switch": 0, "brightness": 0, "vui_error": "nincs mozgás-szolgáltatás bekötve"}
         try:
             r = _sess().get(f"{MOTION}/led", timeout=AUX_TIMEOUT)
             return r.json()
         except Exception as exc:
-            return {"r": 0, "g": 0, "b": 0, "error": _detail(exc)}
+            return {"switch": 0, "brightness": 0, "vui_error": _detail(exc)}
 
-    def set_led(self, r: int, g: int, b: int):
+    def set_led(self, switch: Optional[int] = None, brightness: Optional[int] = None):
         if not MOTION:
             return False, "csak megfigyelő mód: nincs mozgás-szolgáltatás bekötve"
+        payload = {}
+        if switch is not None:
+            payload["switch"] = int(switch)
+        if brightness is not None:
+            payload["brightness"] = int(brightness)
+        if not payload:
+            return False, "legalabb 'switch' (0|1) vagy 'brightness' (0-10) kotelezo"
         try:
-            r_resp = _sess().post(f"{MOTION}/led", json={"r": int(r), "g": int(g), "b": int(b)}, timeout=CMD_TIMEOUT)
-            if r_resp.status_code == 503:
-                return False, _detail(r_resp) or "a voice/audio DDS szolgáltatás nem válaszol a roboton (503)"
+            r_resp = _sess().post(f"{MOTION}/led", json=payload, timeout=CMD_TIMEOUT)
+            if r_resp.status_code in (422, 503):
+                return False, _detail(r_resp)
             r_resp.raise_for_status()
-            log("info", "motion", f"LED szín beállítva: RGB({r},{g},{b})")
+            log("info", "motion", f"LED beállítva: {payload}")
             return True, None
         except Exception as exc:
             err = _detail(exc)
-            log("warn", "motion", f"LED szín beállítás sikertelen: {err}")
+            log("warn", "motion", f"LED beállítás sikertelen: {err}")
             return False, err
 
     def get_led_presets(self):
         default_presets = {
-            "off": {"r": 0, "g": 0, "b": 0},
-            "white": {"r": 255, "g": 255, "b": 255},
-            "red": {"r": 255, "g": 0, "b": 0},
-            "green": {"r": 0, "g": 255, "b": 0},
-            "blue": {"r": 0, "g": 0, "b": 255},
-            "yellow": {"r": 255, "g": 255, "b": 0},
-            "cyan": {"r": 0, "g": 255, "b": 255},
-            "magenta": {"r": 255, "g": 0, "b": 255},
-            "orange": {"r": 255, "g": 128, "b": 0},
-            "purple": {"r": 128, "g": 0, "b": 255},
-            "pink": {"r": 255, "g": 105, "b": 180},
-            "warm_white": {"r": 255, "g": 200, "b": 120},
+            "off": {"switch": 0},
+            "on": {"switch": 1, "brightness": 10},
+            "dim": {"switch": 1, "brightness": 3},
+            "bright": {"switch": 1, "brightness": 10},
         }
         if not MOTION:
             return default_presets
@@ -444,8 +443,8 @@ class LiveRobot:
             return False, "csak megfigyelő mód: nincs mozgás-szolgáltatás bekötve"
         try:
             r_resp = _sess().post(f"{MOTION}/led/preset/{name}", timeout=CMD_TIMEOUT)
-            if r_resp.status_code == 503:
-                return False, _detail(r_resp) or "a voice/audio DDS szolgáltatás nem válaszol a roboton (503)"
+            if r_resp.status_code in (422, 503):
+                return False, _detail(r_resp)
             r_resp.raise_for_status()
             log("info", "motion", f"LED preset beállítva: {name}")
             return True, None

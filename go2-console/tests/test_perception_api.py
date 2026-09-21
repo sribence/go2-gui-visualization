@@ -135,20 +135,19 @@ def test_led_endpoints():
     assert res_get.status_code == 200
 
     # POST /api/led
-    res_post = client.post("/api/led", json={"r": 128, "g": 0, "b": 255})
+    res_post = client.post("/api/led", json={"switch": 1, "brightness": 10})
     assert res_post.status_code == 200
-    assert res_post.json()["r"] == 128
-    assert res_post.json()["g"] == 0
-    assert res_post.json()["b"] == 255
+    assert res_post.json()["switch"] == 1
+    assert res_post.json()["brightness"] == 10
 
     # GET /api/led/presets
     res_presets = client.get("/api/led/presets")
     assert res_presets.status_code == 200
-    assert "purple" in res_presets.json()
+    assert "bright" in res_presets.json()
 
-    # POST /api/led/preset/purple
-    res_preset_post = client.post("/api/led/preset/purple")
+    # POST /api/led/preset/bright
+    res_preset_post = client.post("/api/led/preset/bright")
     assert res_preset_post.status_code == 200
-    assert res_preset_post.json()["preset"] == "purple"
+    assert res_preset_post.json()["preset"] == "bright"
 
 

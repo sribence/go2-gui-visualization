@@ -1096,15 +1096,15 @@ export default {
     }
   },
 
-  lastPurpleLedTime: 0,
+  lastTargetLedTime: 0,
   triggerTargetLed(data) {
     const hasTarget = data && (data.target_id != null || (Array.isArray(data.persons) && data.persons.length > 0));
     const mode = lastFollowData ? lastFollowData.mode : "off";
     if (hasTarget && mode !== "off") {
       const now = Date.now();
-      if (now - this.lastPurpleLedTime > 4000) {
-        this.lastPurpleLedTime = now;
-        api.post("/api/led/preset/purple").catch(() => {});
+      if (now - this.lastTargetLedTime > 5000) {
+        this.lastTargetLedTime = now;
+        api.post("/api/led/preset/bright").catch(() => {});
       }
     }
   },

@@ -19,14 +19,13 @@ export default {
       ["1x1", "2x1", "2x2", "3x3"].map((g) => el("option", { value: g, text: g })));
     ui.gridSel.value = store.get("cam.grid", "2x2");
     const lightSlider = el("input", {
-      type: "range", min: 0, max: 100, value: 100,
-      title: "💡 Go2 LED Fényerősség (Lámpa mód)",
+      type: "range", min: 0, max: 10, value: 10,
+      title: "💡 Go2 LED Fényerősség (0-10)",
       style: { width: "80px", cursor: "pointer" },
-      oninput: (e) => {
-        const pct = parseInt(e.target.value);
-        const val = Math.round((pct / 100) * 255);
-        api.post("/api/led", { r: val, g: val, b: val }).catch(err => {
-          toast(err.message || "a voice/audio DDS szolgáltatás nem válaszol a roboton (503)", "warn");
+      onchange: (e) => {
+        const br = parseInt(e.target.value);
+        api.post("/api/led", { brightness: br, switch: br > 0 ? 1 : 0 }).catch(err => {
+          toast(err.message || "Hiba a LED állításakor", "warn");
         });
       }
     });
