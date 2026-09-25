@@ -156,8 +156,13 @@ def estop():
 
 @app.post("/api/arm")
 async def arm(request: Request):
-    body = await request.json()
-    demo.robot.arm(bool(body.get("armed", True)))
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    val = body.get("armed")
+    armed_val = True if val is None else bool(val)
+    demo.robot.arm(armed_val)
     return demo.robot.snapshot()
 
 

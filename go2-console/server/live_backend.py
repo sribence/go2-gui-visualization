@@ -1369,7 +1369,7 @@ def get_system_health() -> dict:
     service_specs = [
         ("WebRTC Bridge Állapot", "http://127.0.0.1:5001/state"),
         ("Kamera JPEG Stream", "http://127.0.0.1:5001/camera.jpg"),
-        ("Motion VUI / LED", "http://127.0.0.1:9102/led"),
+        ("Motion Vezérlés & LED", "http://127.0.0.1:9102/health"),
         ("Go2 Console UI", "http://127.0.0.1:9200/"),
         ("Web Dashboard", "http://127.0.0.1:8080/"),
         ("Mission Control", "http://127.0.0.1:8000/"),
@@ -1384,10 +1384,20 @@ def get_system_health() -> dict:
                 code = resp.status
                 latency = round((time.time() - req_start) * 1000, 1)
                 s_ok = 200 <= code < 400
+                if s_ok and "9102/health" in s_url:
+                    try:
+                        m_data = _json.loads(resp.read().decode("utf-8"))
+                        if not m_data.get("sdk_ready", True) or m_data.get("sdk_error"):
+                            s_ok = False
+                            code = "SDK HIBA"
+                            err_txt = m_data.get("sdk_error") or "SportClient nem elérhető"
+                            diagnostics.append(f"🔴 Mozgásvezérlés (mc_motion) nem élesíthető: {err_txt}. Újraindítás: `docker restart nero_go2_mc_motion`")
+                    except Exception:
+                        pass
         except urllib.error.HTTPError as e:
             code = e.code
             latency = round((time.time() - req_start) * 1000, 1)
-            s_ok = code in (200, 404) # 404 might be valid route missing, but endpoint is listening
+            s_ok = code in (200, 404)
         except Exception as e:
             code = None
             latency = None
