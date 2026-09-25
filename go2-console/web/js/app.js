@@ -11,7 +11,7 @@ const { api, el, $, clear, toast, store, fmt } = await import("./core.js" + V);
 // Loaded dynamically so the asset version can be appended -- static imports
 // cannot be versioned, and a cached stale module is a silent, confusing bug.
 const MODULE_FILES = [
-  "overview", "perception", "live3d", "map", "manual", "cameras", "sensors",
+  "overview", "health", "perception", "live3d", "map", "manual", "cameras", "sensors",
   "missions", "audio", "blackbox", "remote", "settings",
 ];
 const MODULES = (await Promise.all(

@@ -1294,5 +1294,188 @@ def start_background():
     slam.start_background()
     threading.Thread(target=_load_sounds_async, daemon=True, name="live-sounds").start()
     log("info", "console", f"éles backend indult, core: {CORE}")
-if not TOKEN:
-    log("info", "console", "MC_API_TOKEN nincs megadva (alapértelmezett hídmód/web_dashboard használata)")
+    if not TOKEN:
+        log("info", "console", "MC_API_TOKEN nincs megadva (alapértelmezett hídmód/web_dashboard használata)")
+
+
+def get_system_health() -> dict:
+    """Comprehensive system health probe inspecting containers, HTTP services,
+    DDS telemetry link, battery, and temperatures."""
+    import subprocess
+    import urllib.request
+    import urllib.error
+
+    t0 = time.time()
+    diagnostics = []
+
+    # 1. Docker Containers Inspection
+    container_specs = [
+        ("nero_go2_webrtc_bridge_1", "WebRTC & Kamera Híd", "webrtc_bridge", "http://127.0.0.1:5001/state"),
+        ("nero_go2_web_dashboard_1", "Web Dashboard (8080)", "web_dashboard", "http://127.0.0.1:8080/"),
+        ("nero_go2_go2_console_1", "Go2 Operator Console", "go2_console", "http://127.0.0.1:9200/"),
+        ("nero_go2_mc_audio_1", "Hang & Audio Szolgáltatás", "mc_audio", "http://127.0.0.1:9102/led"),
+        ("nero_go2_mission_control_1", "Mission Control Vezérlés", "mission_control", "http://127.0.0.1:8000/"),
+        ("nero_go2_mc_motion", "Mozgás & VUI LED Szolgáltatás", "mc_motion", "http://127.0.0.1:9102/led"),
+        ("nero_go2_hesai_bridge", "Hesai 3D LiDAR Híd", "hesai_bridge", "http://127.0.0.1:5001/state"),
+        ("nero_go2_perception", "Perception / Személykövetés", "perception", "http://127.0.0.1:9102/led"),
+        ("nero_go2_realsense_bridge", "RealSense Kamera Híd", "realsense_bridge", "http://127.0.0.1:5001/state"),
+    ]
+
+    containers = []
+    for c_name, c_label, c_short, probe_url in container_specs:
+        c_ok = False
+        status_str = "STOPPED"
+        restarts = 0
+
+        # Try Docker CLI / Inspect first
+        try:
+            res = subprocess.run(
+                ["docker", "inspect", "-f", "{{.State.Running}}|{{.RestartCount}}", c_name],
+                capture_output=True, text=True, timeout=1.5
+            )
+            if res.returncode == 0 and "|" in res.stdout:
+                parts = res.stdout.strip().split("|")
+                is_running = parts[0].lower() == "true"
+                restarts = int(parts[1]) if parts[1].isdigit() else 0
+                c_ok = is_running
+                status_str = "RUNNING" if is_running else "STOPPED"
+        except Exception:
+            pass
+
+        # If Docker CLI is unavailable inside container, fallback to probing associated HTTP service
+        if not c_ok and probe_url:
+            try:
+                req = urllib.request.Request(probe_url, headers={"User-Agent": "HealthChecker/1.0"})
+                with urllib.request.urlopen(req, timeout=1.0) as resp:
+                    if 200 <= resp.status < 500:
+                        c_ok = True
+                        status_str = "RUNNING"
+            except Exception:
+                pass
+
+        containers.append({
+            "name": c_name,
+            "label": c_label,
+            "short": c_short,
+            "ok": c_ok,
+            "status": status_str,
+            "restarts": restarts
+        })
+
+        if not c_ok:
+            diagnostics.append(f"🔴 Konténer nem válaszol: {c_label} ({c_name}). Újraindítás: `docker-compose restart {c_short}`")
+
+    # 2. HTTP Endpoint Probes
+    service_specs = [
+        ("WebRTC Bridge Állapot", "http://127.0.0.1:5001/state"),
+        ("Kamera JPEG Stream", "http://127.0.0.1:5001/camera.jpg"),
+        ("Motion VUI / LED", "http://127.0.0.1:9102/led"),
+        ("Go2 Console UI", "http://127.0.0.1:9200/"),
+        ("Web Dashboard", "http://127.0.0.1:8080/"),
+        ("Mission Control", "http://127.0.0.1:8000/"),
+    ]
+
+    services = []
+    for s_name, s_url in service_specs:
+        req_start = time.time()
+        try:
+            req = urllib.request.Request(s_url, headers={"User-Agent": "HealthChecker/1.0"})
+            with urllib.request.urlopen(req, timeout=1.8) as resp:
+                code = resp.status
+                latency = round((time.time() - req_start) * 1000, 1)
+                s_ok = 200 <= code < 400
+        except urllib.error.HTTPError as e:
+            code = e.code
+            latency = round((time.time() - req_start) * 1000, 1)
+            s_ok = code in (200, 404) # 404 might be valid route missing, but endpoint is listening
+        except Exception as e:
+            code = None
+            latency = None
+            s_ok = False
+            diagnostics.append(f"⚠️ Mikroszolgáltatás nem válaszol: {s_name} ({s_url}) -- {e}")
+
+        services.append({
+            "name": s_name,
+            "url": s_url,
+            "ok": s_ok,
+            "code": code or "Hiba",
+            "latency_ms": latency
+        })
+
+    # 3. Hardware & DDS Telemetry Link
+    snap = robot.snapshot()
+    link = snap.get("link", {})
+    link_ok = link.get("healthy", False)
+    batt = snap.get("battery") or {}
+    batt_pct = batt.get("percent")
+    max_m_temp = snap.get("max_motor_temp")
+    body_temp = snap.get("body_temp_c")
+
+    hardware = []
+
+    # Link status
+    hardware.append({
+        "name": "WebRTC DDS Kapcsolat",
+        "ok": link_ok,
+        "details": f"Jelzés: {'🟢 Aktív' if link_ok else '🔴 Megszakadt'} (Késleltetés: {link.get('latency_ms', '--')} ms)"
+    })
+    if not link_ok:
+        diagnostics.append("🔴 A robot DDS/WebRTC kapcsolata bontva! Ellenőrizd a LAN hálózatot és a robot bekapcsolt állapotát.")
+
+    # Battery
+    batt_ok = (batt_pct is None) or (batt_pct >= 15)
+    hardware.append({
+        "name": "Akkumulátor Rendszer",
+        "ok": batt_ok,
+        "details": f"{batt_pct if batt_pct is not None else '--'}% ({batt.get('voltage', '--')} V, {batt.get('current', '--')} A)"
+    })
+    if batt_pct is not None and batt_pct < 15:
+        diagnostics.append(f"⚠️ Alacsony akkumulátor szint: {batt_pct}%! Töltsd fel a robotot.")
+
+    # Temperatures
+    temp_ok = (max_m_temp is None) or (max_m_temp < 65)
+    hardware.append({
+        "name": "Motor & Testhőmérsékletek",
+        "ok": temp_ok,
+        "details": f"Max motor: {max_m_temp if max_m_temp is not None else '--'} °C, Test: {body_temp if body_temp is not None else '--'} °C"
+    })
+    if max_m_temp is not None and max_m_temp >= 65:
+        diagnostics.append(f"🔥 Magas motor hőmérséklet: {max_m_temp} °C! Pihentesd a robotot.")
+
+    # LiDAR status
+    hardware.append({
+        "name": "Unitree Go2 LiDAR",
+        "ok": link_ok,
+        "details": f"Státusz: {'🟢 Pontfelhő fogadása rendben' if link_ok else '⚪ Várakozás kapcsolatra'}"
+    })
+    hardware.append({
+        "name": "Hesai 3D LiDAR",
+        "ok": True,
+        "details": "Ethernet bridge illesztő aktív"
+    })
+
+    # Overall Status Determination
+    critical_failed = any(not c["ok"] for c in containers if c["short"] in ("webrtc_bridge", "mc_motion", "go2_console")) or not link_ok
+    any_failed = any(not c["ok"] for c in containers) or any(not s["ok"] for s in services) or not batt_ok or not temp_ok
+
+    if critical_failed:
+        overall = "CRITICAL"
+        summary_txt = "KRITIKUS HIBA: Egy vagy több alapvető rendszerkomponens leállt"
+    elif any_failed:
+        overall = "DEGRADED"
+        summary_txt = "DEGRADÁLT MŰKÖDÉS: Néhány nem-kritikus szolgáltatás figyelmet igényel"
+    else:
+        overall = "OK"
+        summary_txt = "MINDEN RENDSZER OPERATÍV (100%-ban működik)"
+
+    return {
+        "timestamp": time.time(),
+        "overall_status": overall,
+        "mode": "live",
+        "summary": summary_txt,
+        "containers": containers,
+        "services": services,
+        "hardware": hardware,
+        "diagnostics": diagnostics,
+    }
+

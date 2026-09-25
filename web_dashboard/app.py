@@ -1447,7 +1447,7 @@ def _init_sdk():
 
         # domainId=0 (matches the robot's own rt/... topics), network
         # interface name is the Jetson's real NIC (ld. docs/01-halozat.md).
-        ChannelFactoryInitialize(0, os.environ.get("DDS_NETWORK_INTERFACE", "eth10"))
+        ChannelFactoryInitialize(0, os.environ.get("DDS_NETWORK_INTERFACE", "eth0"))
 
         low_state_sub = ChannelSubscriber("rt/lowstate", LowState_)
         low_state_sub.Init(low_state_handler, 10)
@@ -2447,4 +2447,5 @@ if __name__ == "__main__":
     # (showcase_data, slam_data, realsense_data, thermal_stream) — szálkezelés
     # nélkül a fejlesztői szerver egyetlen kapcsolatra korlátozódik, és az
     # /arm-hoz hasonló rövid POST-kérések percekig várakozhatnak a sorban.
-    app.run(host="0.0.0.0", port=5002, threaded=True)
+    port = int(os.environ.get("PORT", 5002))
+    app.run(host="0.0.0.0", port=port, threaded=True)

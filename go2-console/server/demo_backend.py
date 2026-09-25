@@ -897,3 +897,51 @@ blackbox.trigger("startup_selftest")
 def start_background():
     """Symmetry with live_backend; the demo needs no deferred startup."""
     return None
+
+
+def get_system_health() -> dict:
+    """Returns synthetic system health status for demo mode."""
+    snap = robot.snapshot()
+    link = snap.get("link", {})
+    batt = snap.get("battery", {})
+
+    containers = [
+        {"name": "nero_go2_webrtc_bridge_1", "label": "WebRTC & Kamera Híd", "ok": True, "status": "RUNNING", "restarts": 0},
+        {"name": "nero_go2_web_dashboard_1", "label": "Web Dashboard (8080)", "ok": True, "status": "RUNNING", "restarts": 0},
+        {"name": "nero_go2_go2_console_1", "label": "Go2 Operator Console", "ok": True, "status": "RUNNING", "restarts": 0},
+        {"name": "nero_go2_mc_audio_1", "label": "Hang & Audio Szolgáltatás", "ok": True, "status": "RUNNING", "restarts": 0},
+        {"name": "nero_go2_mission_control_1", "label": "Mission Control Vezérlés", "ok": True, "status": "RUNNING", "restarts": 0},
+        {"name": "nero_go2_mc_motion", "label": "Mozgás & VUI LED Szolgáltatás", "ok": True, "status": "RUNNING", "restarts": 0},
+        {"name": "nero_go2_hesai_bridge", "label": "Hesai 3D LiDAR Híd", "ok": True, "status": "RUNNING", "restarts": 0},
+        {"name": "nero_go2_perception", "label": "Perception / Személykövetés", "ok": True, "status": "RUNNING", "restarts": 0},
+        {"name": "nero_go2_realsense_bridge", "label": "RealSense Kamera Híd", "ok": True, "status": "RUNNING", "restarts": 0},
+    ]
+
+    services = [
+        {"name": "WebRTC Bridge Állapot", "url": "http://127.0.0.1:5001/state", "ok": True, "code": 200, "latency_ms": 4.2},
+        {"name": "Kamera JPEG Stream", "url": "http://127.0.0.1:5001/camera.jpg", "ok": True, "code": 200, "latency_ms": 11.5},
+        {"name": "Motion VUI / LED", "url": "http://127.0.0.1:9102/led", "ok": True, "code": 200, "latency_ms": 2.1},
+        {"name": "Go2 Console UI", "url": "http://127.0.0.1:9200/", "ok": True, "code": 200, "latency_ms": 1.8},
+        {"name": "Web Dashboard", "url": "http://127.0.0.1:8080/", "ok": True, "code": 200, "latency_ms": 3.4},
+        {"name": "Mission Control", "url": "http://127.0.0.1:8000/", "ok": True, "code": 200, "latency_ms": 3.0},
+    ]
+
+    hardware = [
+        {"name": "WebRTC DDS Kapcsolat", "ok": True, "details": f"Demó szimuláció (Késleltetés: {link.get('latency_ms', 10)} ms)"},
+        {"name": "Akkumulátor Rendszer", "ok": True, "details": f"{batt.get('percent', 95)}% ({batt.get('voltage', 25.2)} V, {batt.get('current', -1.2)} A)"},
+        {"name": "Motor Hőmérsékletek", "ok": True, "details": f"Max motor: {snap.get('max_motor_temp', 36)} °C, Test: {snap.get('body_temp_c', 34)} °C"},
+        {"name": "Unitree Go2 LiDAR", "ok": True, "details": "Pontfelhő dekódoló aktív (LibVoxelDecoder)"},
+        {"name": "Hesai 3D LiDAR", "ok": True, "details": "Ethernet bridge vétel rendben (Yaw: 180°)"},
+    ]
+
+    return {
+        "timestamp": time.time(),
+        "overall_status": "OK",
+        "mode": "demo",
+        "summary": "Minden rendszer 100%-ban működik (Demó üzemmód)",
+        "containers": containers,
+        "services": services,
+        "hardware": hardware,
+        "diagnostics": [],
+    }
+

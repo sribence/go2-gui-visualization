@@ -85,6 +85,14 @@ def health():
     return {"ok": True, "mode": BACKEND_NAME, "t": time.time()}
 
 
+@app.get("/api/system/health")
+async def system_health():
+    """Detailed health check of containers, microservices, and hardware telemetry."""
+    if hasattr(demo, "get_system_health"):
+        return await run_in_threadpool(demo.get_system_health)
+    return {"overall_status": "UNKNOWN", "summary": "Health checker not implemented in current backend"}
+
+
 # ---------------------------------------------------------------------------
 # Settings registry -- the inspectors are generated from this
 # ---------------------------------------------------------------------------
